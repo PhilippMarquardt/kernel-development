@@ -104,7 +104,7 @@ class TorchTimer:
 
     def __init__(self, adapter: Any, modules: dict[str, Any], states: dict[str, Any], shape: Any, seed: int,
                  params: TimingParams, flusher: Any = None, overhead: Overhead | None = None,
-                 select: Callable[[str], None] | None = None) -> None:
+                 select: Callable[[str], None] | None = None, inputs: Any = None) -> None:
         from kdev.timing import graph as G
         from kdev.timing.flush import DEFAULT_FLUSH_BYTES, Flusher
 
@@ -115,7 +115,7 @@ class TorchTimer:
         self._labels = list(modules)
         self._flush = flusher or Flusher(params.flush, params.flush_bytes or DEFAULT_FLUSH_BYTES)
         self._ovh = overhead or Overhead(mode=params.overhead)
-        self.inputs = adapter.make_inputs(shape, seed)
+        self.inputs = adapter.make_inputs(shape, seed) if inputs is None else inputs
         self._fns: dict[str, Callable[[], Any]] = {}
         self._graphs: dict[str, Any] = {}
         self._outs: dict[str, Any] = {}
@@ -509,11 +509,34 @@ def select_shapes(adapter: Any, spec: JobSpec, params: TimingParams) -> list[Any
         shapes = [Shape(c.get("shape_id", f"case{i}"), dict(c.get("case", c)), weight=c.get("weight", 1.0),
                         load=c.get("load", ""), seed=c.get("seed")) for i, c in enumerate(extra["cases"])]
     if params.shapes:
-        f = params.shapes
-        shapes = [s for s in shapes if f in s.shape_id or f in str(s.case)]
+        fs = [f.strip() for f in str(params.shapes).split(",") if f.strip()]
+        shapes = [s for s in shapes if any(f in s.shape_id or f in str(s.case) for f in fs)]
+    if extra.get("seeds_from_judge") and shapes:
+        shapes = _judge_seeded(adapter, shapes, _load_json(extra["seeds_from_judge"]))
     if hasattr(adapter, "set_shapes"):
         adapter.set_shapes(shapes)
     return shapes
+
+
+def _judge_seeded(adapter: Any, shapes: list[Any], jj: dict[str, Any]) -> list[Any]:
+    """Copies of ``shapes`` carrying the per-case seeds of a judge JSON (matched by case; others unchanged)."""
+    from dataclasses import replace
+
+    try:
+        js = adapter.judge_cases(jj)
+    except Exception:  # noqa: BLE001
+        from kdev.timing.calib import parse_judge_json
+
+        js = parse_judge_json(jj).shapes
+    by_id = {getattr(j, "shape_id", None): getattr(j, "seed", None) for j in js}
+    by_case = {str(sorted(dict(getattr(j, "case", {}) or {}).items())): getattr(j, "seed", None) for j in js}
+    out = []
+    for s in shapes:
+        sd = by_id.get(s.shape_id)
+        if sd is None:
+            sd = by_case.get(str(sorted(dict(s.case).items())))
+        out.append(replace(s, seed=int(sd)) if sd is not None else s)
+    return out
 
 
 @dataclass
@@ -542,6 +565,9 @@ class Session:
     foreign_end: list[int] | None = None
     hook: Any = None                               # P5 load_inline hook (None: legacy ext dir / P5 absent)
     variants: dict[str, tuple[dict[str, Any], list[str]]] = field(default_factory=dict)  # label -> knobs, defines
+    pads: list[Any] = field(default_factory=list)  # judge-mode prepare pads (kept alive: they shape placement)
+    pad_bytes: dict[str, int] = field(default_factory=dict)
+    shape_overhead: dict[str, dict[str, Any]] = field(default_factory=dict)  # judge mode: per-shape 2*one-two
 
     def select(self, label: str) -> None:
         """Point the build hook at ``label``'s knobs/defines (submissions often load_inline lazily, at the
@@ -624,6 +650,9 @@ def open_session(spec: JobSpec, run_dir: Any, files: list[_File]) -> Session:
             pass
     ss.foreign_start = _env.foreign_contexts()
     ss.hook = None if extra.get("legacy_ext") else _install_build_hook(ss, spec)
+    import random as _random
+
+    pad_rng = _random.Random(int(extra.get("pad_seed", 0) or 0)) if extra.get("prepare_pad") else None
     with _env.no_compile_guard(enabled=not params.allow_jit):
         for f in files:
             t0 = time.time()
@@ -634,6 +663,10 @@ def open_session(spec: JobSpec, run_dir: Any, files: list[_File]) -> Session:
             try:
                 mod = ss.adapter.load(f.path, f.label)
                 ss.modules[f.label] = mod
+                if pad_rng is not None:      # judge setup.prepare_pad: random 8-32 MB allocated before prepare
+                    nb = pad_rng.randrange(8 << 20, 32 << 20) & ~4095
+                    ss.pads.append(torch.empty(nb, dtype=torch.uint8, device="cuda"))
+                    ss.pad_bytes[f.label] = nb
                 ss.states[f.label] = ss.adapter.prepare(mod)
             except Exception as e:  # noqa: BLE001
                 if type(e).__name__ == "NeedsBuild":
@@ -946,11 +979,19 @@ def _run(spec: JobSpec, run_dir: Any, kind: str) -> Result:
         raise KdevError(ErrorCode.INVALID_REQUEST, "no files", recovery="give at least one file")
     if kind == "ab" and len(spec.files) < 2:
         raise KdevError(ErrorCode.INVALID_REQUEST, "ab needs two or more files", recovery="kdev ab A.py B.py")
+    from kdev.timing import judge_mode as JM
+
+    jm = JM.enabled(spec.params or {})
+    if jm and kind == "ab":
+        return JM.run_ab_judge(spec, run_dir)
     ad, _, _ = resolve_adapter(spec)
     files = _files_for(spec, kind, lambda: ad.baseline_path())
     ss = open_session(spec, run_dir, files)
     try:
-        time_shapes(ss)
+        if jm:
+            JM.time_shapes_judge(ss)
+        else:
+            time_shapes(ss)
     finally:
         close_session(ss)
     disp, disp_warn = _isolated_dispatch(spec, run_dir, kind) if ss.error is None else (None, [])
@@ -967,6 +1008,8 @@ def _run(spec: JobSpec, run_dir: Any, kind: str) -> Result:
     if kind == "ab" and BASE_LABEL in labels and score is not None:
         score["vs_base"] = score_block(_group(ss.samples), ss.shapes, BASE_LABEL, labels, _score_fn(ss))
     fid = fidelity(ss)
+    if jm:
+        JM.annotate_time(ss, rows, fid)
     verdict = overall_verdict(rows, score, nf)
     warnings = list(ss.warnings)
     if _clocks_moved(ss):
@@ -1011,6 +1054,10 @@ def _run(spec: JobSpec, run_dir: Any, kind: str) -> Result:
             res.warnings.append(f"{cal['small_sub_shapes']} shape(s) < {calibtab.SMALL_US:.0f} us: ~judge us "
                                 f"uncertain (+-{calibtab.SMALL_ABS_US} us judge overhead spread); compare absolute us")
     res.lines = render_lines(kind, verdict, rows, score, fid, labels)
+    if jm:
+        res.summary.update(mode="judge", protocol=JM.PROTOCOL_TAG, pad_bytes=ss.pad_bytes,
+                           first=(ss.params.extra or {}).get("first", "baseline"))
+        res.lines = JM.render_time(verdict, rows, score)
     if any(v is False for v in ss.checks.values()):
         res.status = "fail"
     if ss.error is not None:

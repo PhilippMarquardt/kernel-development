@@ -16,7 +16,7 @@ from kdev.registry import Arg, Context, Registry
 P = "P3"
 
 FIDELITY_ARGS = [
-    Arg(("--reps",), "paired repetitions per shape (per seed)", type="int", default=40),
+    Arg(("--reps",), "paired repetitions per shape (per seed; default 40, judge mode 60)", type="int", default=None),
     Arg(("--seeds",), "input seeds per shape (default: adapter variance: 1 or 5)", type="int", default=None),
     Arg(("--flush",), "L2 flush method (non-read = recorded opt-out)", choices=("read", "write", "none"),
         default="read"),
@@ -25,6 +25,15 @@ FIDELITY_ARGS = [
     Arg(("--overhead",), "subtraction: judge = 4.0 us const, local = measured 2*one-two graph cost (opt-out)",
         choices=("judge", "local", "none"), default="judge"),
     Arg(("--allow-jit",), "allow compiling inside the GPU lane (opt-out, logged)", action="store_true"),
+]
+
+JUDGE_ARGS = [
+    Arg(("--gate-us",), "judge mode: GPU gate after the flush before every replay (us)", type="float", default=None),
+    Arg(("--fresh",), "judge mode: fresh input sets cycled per rep pair (0/1 = fixed inputs)", type="int", default=None),
+    Arg(("--first",), "judge mode: side prepared first and replayed first on even reps",
+        choices=("baseline", "submission"), default=None),
+    Arg(("--no-pad",), "judge mode: no random 8-32 MB prepare pads", action="store_true"),
+    Arg(("--judge-json",), "judge mode: take the per-case input seeds from this judge JSON", type="path", default=None),
 ]
 
 GPU_FX = Effects(gpu="queued", writes=("run_dir", "ledger"))
@@ -54,7 +63,7 @@ def _get(args: Namespace, name: str, default: Any = None) -> Any:
 def timing_params(args: Namespace, **over: Any) -> dict[str, Any]:
     """TimingParams dict from the shared fidelity flags (+ overrides)."""
     flush_mb = _get(args, "flush_mb")
-    reps = _get(args, "reps", 40)
+    reps = _get(args, "reps", None)
     if reps is not None and reps < 2:
         raise KdevError(ErrorCode.INVALID_REQUEST, "--reps must be >= 2 (pairs of order-swapped reps)",
                         recovery="use --reps 40 (default)")
@@ -66,6 +75,54 @@ def timing_params(args: Namespace, **over: Any) -> dict[str, Any]:
                      allow_jit=bool(_get(args, "allow_jit", False)))
     d = p.to_dict()
     d.update(over)
+    return d
+
+
+def is_okc(paths: list[str], problem: str | None = None) -> bool:
+    """An OKC problem: a known problem name, or a file whose dir (or 1-2 levels up) has reference.py +
+    baseline.py."""
+    if problem:
+        try:
+            from kdev.adapters.okc import known_problems
+
+            nm = os.path.basename(os.path.normpath(problem))
+            if nm in known_problems() or "muse_" + nm in known_problems():
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        paths = [os.path.join(problem, "x")] + list(paths)
+    for p in paths:
+        d = os.path.dirname(os.path.abspath(os.path.expanduser(p)))
+        for _ in range(3):
+            if os.path.isfile(os.path.join(d, "reference.py")) and os.path.isfile(os.path.join(d, "baseline.py")):
+                return True
+            d = os.path.dirname(d)
+    return False
+
+
+def judge_params(args: Namespace, d: dict[str, Any]) -> dict[str, Any]:
+    """Turn a TimingParams dict into judge mode (kdev.timing.judge_mode, docs/PROTOCOL.md 9)."""
+    from kdev.timing import judge_mode as JM
+
+    if _get(args, "reps") is None:
+        d["reps"] = JM.REPS
+    if d.get("flush") != "read" or not d.get("graph", True):
+        raise KdevError(ErrorCode.INVALID_REQUEST, "--judge-mode needs the read flush and graph replay",
+                        recovery="drop --flush/--eager, or use --fast")
+    ex = dict(d.get("extra") or {})
+    gate = _get(args, "gate_us")
+    ex.update(judge_mode=True, gate_cycles=JM.gate_cycles(JM.GATE_US if gate is None else gate),
+              fresh=JM.FRESH if _get(args, "fresh") is None else int(args.fresh),
+              first=_get(args, "first") or "baseline", prepare_pad=not _get(args, "no_pad", False))
+    ex["base_first"] = ex["first"] == "baseline"
+    jj = _get(args, "judge_json")
+    if jj:
+        if not os.path.isfile(os.path.expanduser(jj)):
+            raise KdevError(ErrorCode.NOT_FOUND, f"--judge-json not found: {jj}", recovery="okc status JOB --json > J")
+        ex["seeds_from_judge"] = os.path.abspath(os.path.expanduser(jj))
+    if _get(args, "rounds"):
+        ex["rounds"] = int(args.rounds)
+    d["extra"] = ex
     return d
 
 
@@ -91,7 +148,13 @@ def build_time_spec(args: Namespace, ctx: Context) -> JobSpec:
             raise KdevError(ErrorCode.NOT_FOUND, f"--base file not found: {base}",
                             recovery="--base baseline|none|PATH")
         base = os.path.abspath(os.path.expanduser(base))
-    return _spec("time", [_file(args.file, "A")], timing_params(args, base=base), args, ctx)
+    params = timing_params(args, base=base)
+    if _get(args, "judge_mode", False):
+        if base == "none":
+            raise KdevError(ErrorCode.INVALID_REQUEST, "--judge-mode times against the baseline",
+                            recovery="drop --base none")
+        params = judge_params(args, params)
+    return _spec("time", [_file(args.file, "A")], params, args, ctx)
 
 
 def parse_sets(sets: list[str] | None, labels: list[str]) -> dict[str, dict[str, Any]]:
@@ -128,7 +191,15 @@ def build_ab_spec(args: Namespace, ctx: Context) -> JobSpec:
     knobs = parse_sets(_get(args, "set"), [f.label for f in files])
     for f in files:
         f.knobs = knobs.get(f.label, {})
-    return _spec("ab", files, timing_params(args, base="none"), args, ctx)
+    params = timing_params(args, base="none")
+    if _get(args, "judge_mode", False) and _get(args, "fast", False):
+        raise KdevError(ErrorCode.INVALID_REQUEST, "--judge-mode and --fast exclude each other",
+                        recovery="pick one")
+    jm = _get(args, "judge_mode", False) or (not _get(args, "fast", False)
+                                             and is_okc(paths, ctx.problem or _get(args, "problem")))
+    if jm:
+        params = judge_params(args, params)
+    return _spec("ab", files, params, args, ctx)
 
 
 def parse_pair(s: str) -> tuple[str, str | None]:
@@ -197,13 +268,23 @@ def cmd_calib_table(args: Namespace, ctx: Context) -> Result:
 def register(reg: Registry) -> None:
     reg.command("time", "judge-faithful timing of one file vs the baseline", cmd_time,
                 args=[Arg(("file",), "submission file", type="path"),
-                      Arg(("--base",), "baseline|none|PATH", default="baseline")] + FIDELITY_ARGS,
+                      Arg(("--base",), "baseline|none|PATH", default="baseline"),
+                      Arg(("--judge-mode",), "the judge's loop: baseline prepared first + interleaved, fresh inputs "
+                          "per pair, prepare pads, gate, per-shape 2*one-two; median RAW reported",
+                          action="store_true")] + FIDELITY_ARGS + JUDGE_ARGS,
                 effects=GPU_FX, gpu=True, long_running=True, package=P)
-    reg.command("ab", "interleaved A/B(/C...) timing with paired-ratio CIs and verdicts", cmd_ab,
+    reg.command("ab", "A/B(/C...) timing: OKC default = judge mode (one process per file, ABBA processes, "
+                "in-process SGLang baseline); --fast = all files in one process", cmd_ab,
                 args=[Arg(("files",), "two or more files", type="path", nargs="+"),
-                      Arg(("--order",), "interleave scheme", choices=("abba", "rotate"), default="abba"),
+                      Arg(("--judge-mode",), "ABBA processes of judge-mode time (default on OKC problems)",
+                          action="store_true"),
+                      Arg(("--fast",), "old mode: all files interleaved in one process (no baseline)",
+                          action="store_true"),
+                      Arg(("--rounds",), "judge mode: ABBA blocks of processes (1 = A B B A)", type="int",
+                          default=None),
+                      Arg(("--order",), "interleave scheme (--fast)", choices=("abba", "rotate"), default="abba"),
                       Arg(("--set",), "LABEL:K=V knob override (repeatable)", action="append", default=None)]
-                + FIDELITY_ARGS,
+                + FIDELITY_ARGS + JUDGE_ARGS,
                 effects=GPU_FX, gpu=True, long_running=True, package=P)
     reg.command("calib", "judge-vs-local per-shape calibration (FILE:JUDGE.json ...); updates the calib table",
                 cmd_calib,

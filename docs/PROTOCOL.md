@@ -95,7 +95,7 @@ the engine uses a private direct OKC adapter (`timing/_direct.py`, calib.py sema
   <10 us shapes (warned). Use `--overhead local` to mimic, at the cost of comparability with calibrated rows.
 - Inputs: judge refills inputs every repetition; kdev uses `seeds` fixed input sets (5 for routing problems).
 - Flush/gate: judge gate ~300 us before each replay; kdev 256 MB read (~65 us). `extra.gate_cycles` adds a gate.
-- Judge state copies (`setup.copies`/`prepare_pad`) are not replicated.
+- Judge state copies (`setup.copies`/`prepare_pad`) are not replicated (judge mode, section 9, adds the pads).
 - Local baseline (SGLang) runs 1-3 us slower than on the judge on short attention/router shapes
   (all_calib.md): compare absolute submission us, not local speedups, on those shapes.
 
@@ -139,3 +139,49 @@ explains up to 0.4 us of it), and the local SGLang baseline is slower than the j
 `$KDEV_HOME/calib/<problem>.json`; `time`/`ab` print `~J` = local us x median ratio (uncertainty
 max(1.5 %, half the observed spread), + 0.3 us/us on shapes < 6 us, flagged `?`). Use absolute sub us
 (and `~J`) to predict the judge; never local speedups on baseline-gap shapes.
+
+## 9. Judge mode `kdev-tp/1+jm` (`time --judge-mode`, `ab` default on OKC problems; board #49)
+
+The judge's per-run loop, read from its records (`setup`, `replay_overhead`, `runs_ns`/`baseline_runs_ns`) and
+rt2_'s `rt2/jf.py`, which reproduced judge pair deltas (`timing/judge_mode.py`):
+
+1. One submission per process. The SGLang baseline is loaded and prepared FIRST (`setup.first = baseline`;
+   `--first submission` flips it: the judge picks per run), each `prepare` preceded by a random 8-32 MB pad
+   (`setup.prepare_pad`; kept alive; `--no-pad`). Pad sizes come from `extra.pad_seed`.
+2. Per shape: inputs from the judge seed (TOML task seed, or the case's seed in `--judge-json J`), plus a pool
+   of `--fresh` (8) inputs `seed + 7919*j` (bounded at 2 GB). Graphs are captured submission first, then the
+   baseline; one warm-up replay each.
+3. `--reps` (60) repetitions; before every even rep the next pool input is copied into the captured input
+   tensors (fresh inputs per pair). Even reps replay the baseline first, odd reps the submission first.
+4. Every replay: 256 MB read flush + `--gate-us` (235) of `torch.cuda._sleep` (flush + gate ~ the judge's
+   `gate_ns` 300 us), events around `g.replay()`.
+5. A 1- and a 2-kernel graph are replayed (same flush + gate) every 4th rep; per-shape overhead
+   `2*median(one) - median(two)` is subtracted from every replay of that shape (judge `overhead_ns`).
+6. Reported per shape: median RAW us of both sides, the overhead, judge pair speedup (median of order-swapped
+   pair geomeans), sub us = base / speedup; score = load-weighted geomean (judge formula).
+
+`ab` (judge mode): the worker spawns one judge-mode `time` child process per file in ABBA order (`A B B A`,
+`--rounds N` repeats the block; distinct pad seeds) and never touches CUDA itself. Per shape it reports the
+RAW delta B-A (mean of each file's processes) with both half-block deltas, the judge-formula us of each file
+(mean over its processes) with a bootstrap CI (pairs resampled inside each process), and the score of every
+process vs its own baseline; `B/A score` = ratio of the mean scores. A verdict other than `same` also needs
+both half-blocks to agree. `--fast` = the old single-process interleaved mode (section 2), still the mode of
+`sweep`. Judge-mode rows are tagged `summary.mode = judge`, `protocol kdev-tp/1+jm`.
+
+Why: in one process, interleaving the SGLang baseline replays with the submission moves router m128/256 raw by
+~0.35 us; the single-process A/B had flipped a verdict (local -0.49 vs judge +0.26 us).
+
+Validation (pod H200, 2026-10-31; judge pair records p1 = base vs stk3b, p3 = base vs sk2o_l125, each file judged
+twice; per-shape RAW delta = mean(B a/b) - mean(A a/b); judge self-noise = |base_b - base_a| per shape):
+
+| pair | method | MAE vs judge (30 shapes) | corr | sign agree (\|dJ\| >= 0.2 us) | MAE on jf's 11 shapes | B/A score (judge) |
+|---|---|---|---|---|---|---|
+| p1 | `ab` judge mode, 1 round | 0.146 us | 0.67 | 7/9 | 0.244 | x1.0064 (x1.0114) |
+| p1 | `ab` judge mode, 2 rounds | 0.142 us | 0.73 | 8/9 | 0.221 | x1.0069 |
+| p1 | rt2/jf.py (11 shapes, g0 / gate 235) | - | 0.72 | 6/8 | 0.228 / 0.228 | - |
+| p1 | `ab --fast` (old) | 0.189 us | 0.45 | 6/9 | 0.276 | x1.007 |
+| p3 | `ab` judge mode, 1 round | 0.147 us | 0.76 | 10/11 | 0.163 | x1.0058 (x1.0059) |
+| p3 | `ab --fast` (old) | 0.186 us | 0.69 | 7/11 | 0.175 | x1.005 |
+
+Judge self-noise MAE: p1 0.20 us, p3 0.13 us, so judge mode is at the judge's own noise level. An ABBA run of
+30 bf16 shapes takes ~80 s (4 processes x ~20 s).

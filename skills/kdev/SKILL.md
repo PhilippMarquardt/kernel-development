@@ -59,8 +59,10 @@ Set `KDEV_AGENT=<your id>`. Run the start checks below at the start of your work
 - `kdev sweep FILE --grid "TILE=64,128 STAGES=2,3,4"` prebuilds every variant in parallel (no compile under
   the GPU lock), quick-checks, then runs batched interleaved A/B against the base. Search the whole cheap
   space: library algorithms, tile/stage/split plans, launch configs, existing `@override` knobs.
-- Compare two concrete files with `kdev ab A.py B.py` (ABBA/rotate interleave, paired-ratio CIs). Verdicts
-  `faster|slower|same` come from the CI, not from a single median. Use `--set B:K=V` for knob variants.
+- Compare two concrete files with `kdev ab A.py B.py` (OKC problems: judge mode = one process per file,
+  A B B A, SGLang baseline interleaved in each; per-shape RAW deltas + judge score; `--fast` = one process).
+  Verdicts `faster|slower|same` come from the CI (and both half-blocks), not from a single median. Use
+  `--set B:K=V` for knob variants.
 
 ## 3. SASS audit of the top-time kernel
 
