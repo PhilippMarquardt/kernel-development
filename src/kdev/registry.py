@@ -31,6 +31,7 @@ COMMAND_MODULES = (
     "kdev.dashboard.commands",
     "kdev.remote.commands",
     "kdev.mcp.commands",
+    "kdev.slim.commands",
 )
 
 
