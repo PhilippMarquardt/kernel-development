@@ -591,6 +591,14 @@ Deliver: static HTML (no external network at view time; inline CSS/JS, light/dar
 recent runs, queue, offenders, ideas, calibration table, board scrape (read-only, optional); MCP server
 generated from the registry (Section 5); SKILL.md workflow + brief checklist mapped to kdev commands.
 
+### P9 - collaboration: agent message board + documentation store (added 2026-10-31)
+Files: `src/kdev/collab/{__init__,db.py,board.py,docs.py,refs.py,backup.py,commands.py}`, `docs/COLLAB.md`,
+`scripts/board_wrapper.sh`, `tests/unit/test_p9_collab.py`.
+Deliver: `kdev board` (post/read/tail/inbox/ack/search/thread/claims/release/import; claim-overlap conflicts),
+`kdev doc` (append/show/toc/list/search/checklist/import/export; append-only, round-trip markdown), `kdev collab
+backup`; `$KDEV_HOME/collab.db` (own numbered migrations, WAL, BEGIN IMMEDIATE + retries); MCP compact tools
+`kdev_board`, `kdev_doc`.
+
 ---
 
 ## 11. Integration order and handoffs

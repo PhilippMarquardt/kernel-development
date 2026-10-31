@@ -26,6 +26,24 @@ one-line `recovery`; do what it says (e.g. `needs_build` -> `kdev build FILE` fi
 5. `kdev dispatch FILE` - confirm which kernels actually run per scored shape. Files carry overwritten entry
    points and embedded alternatives; it is easy to optimise a path that never runs.
 
+## 0b. Talk to the other agents (board + docs)
+
+Set `KDEV_AGENT=<your id>`. Run the start checks below at the start of your work and again before every GPU job.
+
+- **Start checks.** `kdev board inbox` shows posts to you, @mentions, replies and claims that overlap yours.
+  Clear it with `kdev board inbox --ack`. Then run `kdev board read --unread --problem P` and
+  `kdev board claims --problem P`.
+- **Before you start a piece of work,** post a claim:
+  `kdev board post claim "plan" --problem P --files F1,F2 [--shapes S]`.
+  If it prints `CONFLICT`, do not duplicate the work. Ask the owner first:
+  `kdev board post ask "@owner ..." --reply-to ID`.
+- **After every result,** post a finding: `kdev board post finding "variant: x0.98 [0.97,0.99]" --problem P --ref RUN_ID`.
+  Add `--doc notes --section "Round N <id>"` to also file it in the problem notes.
+- **When you finish,** post `kdev board post done "summary" --problem P --ref RUN_ID`. This closes your claim.
+- **Shared knowledge** goes into `kdev doc append notes --problem P --section S "evidence" --ref RUN_ID`. Never edit
+  NOTES.md, LESSONS.md or TRACKER.md by hand: hand edits overwrote each other's sections. Read the notes with
+  `kdev doc toc|show|search`. Get the rules with `kdev doc checklist`.
+
 ## 1. Judge-anchored baseline
 
 - `kdev time FILE` times one file against the problem baseline with the judge protocol: CUDA-graph replay,
@@ -93,10 +111,12 @@ Structural changes (fusion, new kernels, megakernels) come after steps 1-3 and n
 5. No "at the limit" without sass + sweep run ids attached (`kdev note --kind limit`).
 6. `kdev check` + `kdev comply` before promoting anything.
 7. Write evidence (run ids, exact variant, numbers) to the idea board, not just conclusions.
+8. `kdev board inbox` + `kdev board read --unread` at start and before each GPU job; `kdev board post claim ...
+   --files F` before starting; `finding`/`done` with `--ref RUN` after; notes only via `kdev doc append`.
 
 ## MCP clients
 
 `kdev mcp` exposes the same commands as MCP tools (compact profile: `kdev_doctor`, `kdev_build`, `kdev_check`,
-`kdev_time`, `kdev_ab`, `kdev_sass`, `kdev_timeline`, `kdev_ledger`, `kdev_idea`, `kdev_job`, `kdev_show`,
-`kdev_run`) with identical JSON results. GPU tools return a job id unless `wait_s` (<= 120) is given.
+`kdev_time`, `kdev_ab`, `kdev_sass`, `kdev_timeline`, `kdev_ledger`, `kdev_idea`, `kdev_job`, `kdev_board`,
+`kdev_doc`, `kdev_show`, `kdev_run`) with identical JSON results. GPU tools return a job id unless `wait_s` (<= 120) is given.
 Judge checks, raw lock commands, sync/remote and raw SQL are not available over MCP.

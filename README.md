@@ -9,6 +9,8 @@ CUDA graphs, CUPTI, `%globaltimer` instrumentation, compute-sanitizer, and ncu/n
 calib, sass, ab, serve, mcp). Agents: start with [docs/QUICKSTART.md](docs/QUICKSTART.md) (the 10 commands, in
 order) and [skills/kdev/SKILL.md](skills/kdev/SKILL.md). Design: [docs/DESIGN.md](docs/DESIGN.md); binding plan:
 [docs/PLAN.md](docs/PLAN.md); timing protocol and calibration evidence: [docs/PROTOCOL.md](docs/PROTOCOL.md).
+Multi-agent work (P9): `kdev board` (messages, claims with conflict detection, inbox) and `kdev doc` (append-only
+notes/lessons/tracker replacing hand-edited .md files): [docs/COLLAB.md](docs/COLLAB.md).
 
 ## Install
 

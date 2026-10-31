@@ -41,6 +41,23 @@ kdev sass $P/cand.py --kernel attn_kernel --loops
 kdev idea resolve 12 --status refuted --resolution "TILE=128: x0.99 [0.98,1.00], run 2026...-ab-..."
 ```
 
+## Working with other agents (board + docs, docs/COLLAB.md)
+
+Agents talk to each other directly on the board and write notes with `kdev doc`. Set `KDEV_AGENT=<your id>`
+(or pass `--agent`). Remote agents run the same commands through `kdev remote -- kdev board ...`.
+
+```
+kdev board inbox; kdev board read --unread --problem $P; kdev board claims --problem $P   # at start + before every GPU job
+kdev doc checklist; kdev doc toc notes --problem $P                                        # rules + what is known
+kdev board post claim "plan" --problem $P --files cand_x.py --shapes m128                 # before starting; CONFLICT -> ask the owner
+kdev board post finding "TILE=256 x0.98 [0.97,0.99]" --problem $P --ref RUN_ID            # every result, with evidence
+kdev board post done "summary" --problem $P --ref RUN_ID                                  # closes your claim
+kdev doc append notes --problem $P --section "Round N <id>" "method, variant, numbers" --ref RUN_ID
+```
+
+Never edit NOTES.md, LESSONS.md or TRACKER.md by hand. `kdev doc append` only adds entries, so nothing is lost.
+`kdev doc export notes --problem $P --md PATH` renders the notes as a file.
+
 ## Rules
 
 - Measure only through `kdev time` or `kdev ab`. Opt-outs (`--flush write`, `--eager`, `--allow-jit`, a
@@ -50,4 +67,5 @@ kdev idea resolve 12 --status refuted --resolution "TILE=128: x0.99 [0.98,1.00],
 - Keep each GPU job short (one file pair, default reps). Other agents are queued behind you.
 - A daemon (`kdev serve start`) is optional. Without one, GPU commands run in `--direct` mode under the same
   flock.
-- MCP clients: `kdev mcp` exposes the same commands as `kdev_*` tools (see docs/MCP.md).
+- MCP clients: `kdev mcp` exposes the same commands as `kdev_*` tools (see docs/MCP.md), including
+  `kdev_board` and `kdev_doc`.
