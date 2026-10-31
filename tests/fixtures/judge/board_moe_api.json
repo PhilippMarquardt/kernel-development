@@ -1,0 +1,75 @@
+{
+ "board": "muse_moe_w4a16",
+ "sglang_per": "decode step",
+ "rows": [
+  {
+   "job": "850d69d2713343c4",
+   "team": "dolanzhao",
+   "speedup": 2.7577919376381588,
+   "submitted_at": 1793342085.0064502,
+   "screened_speedup": 2.691480225421144,
+   "attempts": 29,
+   "value": 4876.546274740954
+  },
+  {
+   "job": "8af0560874fd41f9",
+   "team": "pjmullin3",
+   "speedup": 2.6853298325819646,
+   "submitted_at": 1793155383.254911,
+   "screening": "screened",
+   "attempts": 31,
+   "value": 5008.13711478756
+  },
+  {
+   "job": "219ef7a835164567",
+   "team": "Abarbir12",
+   "speedup": 2.6344088299640758,
+   "submitted_at": 1793333246.0525026,
+   "screened_speedup": 2.6196158398166984,
+   "attempts": 6,
+   "value": 5104.940374870893
+  },
+  {
+   "job": "d030f6ad55a54fe5",
+   "team": "k9thebeast",
+   "speedup": 2.616996467466166,
+   "submitted_at": 1793404542.9362822,
+   "attempts": 5,
+   "value": 5138.906439954478
+  },
+  {
+   "job": "3c74627e4e8a4520",
+   "team": "mpeng19",
+   "speedup": 2.615977121102664,
+   "submitted_at": 1793250228.2594295,
+   "screening": "screened",
+   "attempts": 26,
+   "value": 5140.908875507025
+  },
+  {
+   "job": "1c3ed790b7214278",
+   "team": "kwanUm",
+   "speedup": 2.59561233396598,
+   "submitted_at": 1793383486.0634573,
+   "attempts": 8,
+   "value": 5181.243679579567
+  },
+  {
+   "job": "a3fb6ef467264367",
+   "team": "Fangzhou66",
+   "speedup": 2.5930768053811843,
+   "submitted_at": 1793402028.1706145,
+   "attempts": 1,
+   "value": 5186.309935784205
+  },
+  {
+   "job": "c3f36d48b0bc4b42",
+   "team": "zzz0906",
+   "speedup": 2.5898626779918352,
+   "submitted_at": 1793203068.010348,
+   "screening": "screened",
+   "attempts": 24,
+   "value": 5192.746362300526
+  }
+ ]
+}

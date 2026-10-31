@@ -1,0 +1,598 @@
+{
+ "board": "muse_bf16_proj",
+ "call_id": "kc-03d8a90d04384928",
+ "cluster": "sfo3",
+ "content_hash": "705a9ba152042452164f7f11cbbb166b0e3e76d723d963dd7b4754fefd98c69e",
+ "created_at": 1793451844.5147493,
+ "dedicated": false,
+ "duplicate_of": null,
+ "finished_at": 1793452136.7116241,
+ "id": "03d8a90d04384928",
+ "limits": {
+  "scored": {
+   "per_day": 10,
+   "used": 0,
+   "left": 10
+  },
+  "checks": {
+   "per_day": 20,
+   "used": 8,
+   "left": 12
+  }
+ },
+ "mode": "check",
+ "output": {
+  "log": "/root/okc/muse_bf16_proj/muse_bf16_proj/profiles/cand_rn2.03d8a90d04384928.log"
+ },
+ "payload_ref": "muse_bf16_proj/705a9ba152042452164f7f11cbbb166b0e3e76d723d963dd7b4754fefd98c69e.py",
+ "profile": {
+  "json": "/root/okc/muse_bf16_proj/muse_bf16_proj/profiles/cand_rn2.03d8a90d04384928.json",
+  "text": "/root/okc/muse_bf16_proj/muse_bf16_proj/profiles/cand_rn2.03d8a90d04384928.txt"
+ },
+ "result": {
+  "baseline_us": 4830.8,
+  "checks": {
+   "flagged": [],
+   "ok": true,
+   "rejected": []
+  },
+  "error": null,
+  "evaluator": {
+   "code_sha256": "986ed3ebb096eab83d16797609f4c0e7895248d6bce33252d25dd306cbe5d018",
+   "image": "localhost:30500/kc/judge@sha256:9a7f287b80d772c6f636bbcb57422c619fe326e2aabc53803b85007bca93f68e"
+  },
+  "flags": [],
+  "gpu": "H200",
+  "log_tail": "26-10-31 13:08:46 77:77 SyncActivityProfilerHandler.cpp:46] profiler_stop\nUSDT:2026-10-31 13:08:46 77:77 SyncActivityProfilerHandler.cpp:39] profiler_start\nUSDT:2026-10-31 13:08:46 77:77 SyncActivityProfilerHandler.cpp:46] profiler_stop\nUSDT:2026-10-31 13:08:46 77:77 SyncActivityProfilerHandler.cpp:39] profiler_start\nUSDT:2026-10-31 13:08:46 77:77 SyncActivityProfilerHandler.cpp:46] profiler_stop\n",
+  "machine": {
+   "gpu_after": {
+    "clocks.max.sm": 1980,
+    "clocks.mem": 3201,
+    "clocks.sm": 1980,
+    "driver_version": "580.159.03",
+    "name": "NVIDIA H200",
+    "power.draw": 129.22,
+    "power.limit": 700,
+    "temperature.gpu": 41
+   },
+   "gpu_before": {
+    "clocks.max.sm": 1980,
+    "clocks.mem": 3201,
+    "clocks.sm": 345,
+    "driver_version": "580.159.03",
+    "name": "NVIDIA H200",
+    "power.draw": 79.39,
+    "power.limit": 700,
+    "temperature.gpu": 37
+   },
+   "node": "n-hg25ugy45aa3trrcfa4kf5iljz"
+  },
+  "passed": true,
+  "records": [
+   {
+    "baseline_copies": 16,
+    "baseline_prepare_pad": 500736,
+    "copies": 1,
+    "error": null,
+    "event": "setup",
+    "first": "baseline",
+    "prepare_pad": 23414272,
+    "prepare_s": 232.262528841,
+    "status": "pass"
+   },
+   {
+    "case": {
+     "layer": "qkv_gate",
+     "m": 1,
+     "seed": 1669629173720508438
+    },
+    "event": "test",
+    "index": 0,
+    "message": "relative L2 error 0.000e+00 (worst row 0.000e+00)",
+    "status": "pass"
+   },
+   {
+    "case": {
+     "layer": "pooler",
+     "m": 7,
+     "seed": 1669645883618609190
+    },
+    "event": "test",
+    "index": 1,
+    "message": "relative L2 error 1.730e-04 (worst row 2.561e-04); 2 probe rows exact to 0.0e+00",
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 0,
+    "case": {
+     "layer": "qkv_gate",
+     "load": "decode 1",
+     "m": 1,
+     "seed": 1671300163530588588,
+     "weight": 62
+    },
+    "speedup": 1.6433185125671728,
+    "paired_ratio": 1.643318512567173,
+    "baseline_ns": 14128.000009804964,
+    "median_ns": 8597.237785470066,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 1,
+    "case": {
+     "layer": "o",
+     "load": "decode 1",
+     "m": 1,
+     "seed": 1671316873428689440,
+     "weight": 62
+    },
+    "speedup": 1.365425856184214,
+    "paired_ratio": 1.3654258561842143,
+    "baseline_ns": 6687.999702990055,
+    "median_ns": 4898.105358631611,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 2,
+    "case": {
+     "layer": "pooler",
+     "load": "decode 1",
+     "m": 1,
+     "seed": 1671333583326790293,
+     "weight": 62
+    },
+    "speedup": 1.6255386411361843,
+    "paired_ratio": 1.6255386411361843,
+    "baseline_ns": 21728.00013795495,
+    "median_ns": 13366.646346080077,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 3,
+    "case": {
+     "layer": "unpooler",
+     "load": "decode 1",
+     "m": 1,
+     "seed": 1671350293224891147,
+     "weight": 62
+    },
+    "speedup": 2.0277173615192563,
+    "paired_ratio": 2.0277173615192563,
+    "baseline_ns": 7007.999811321497,
+    "median_ns": 3456.1028791856825,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 4,
+    "case": {
+     "layer": "router",
+     "load": "decode 1",
+     "m": 1,
+     "seed": 1671367003122992002,
+     "weight": 62
+    },
+    "speedup": 3.0453444593291468,
+    "paired_ratio": 3.0453444593291468,
+    "baseline_ns": 10127.999819815159,
+    "median_ns": 3325.73209864287,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 5,
+    "case": {
+     "layer": "qkv_gate",
+     "load": "decode 16",
+     "m": 16,
+     "seed": 1671383713021092858,
+     "weight": 62
+    },
+    "speedup": 1.44267535569384,
+    "paired_ratio": 1.44267535569384,
+    "baseline_ns": 13840.00014513731,
+    "median_ns": 9593.28797744736,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 6,
+    "case": {
+     "layer": "o",
+     "load": "decode 16",
+     "m": 16,
+     "seed": 1671400422919193715,
+     "weight": 62
+    },
+    "speedup": 1.2106688587415795,
+    "paired_ratio": 1.2106688587415795,
+    "baseline_ns": 6783.999968320131,
+    "median_ns": 5603.514056991363,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 7,
+    "case": {
+     "layer": "pooler",
+     "load": "decode 16",
+     "m": 16,
+     "seed": 1671417132817294573,
+     "weight": 62
+    },
+    "speedup": 1.5823436470011245,
+    "paired_ratio": 1.5823436470011245,
+    "baseline_ns": 21247.999276965857,
+    "median_ns": 13428.18250462553,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 8,
+    "case": {
+     "layer": "unpooler",
+     "load": "decode 16",
+     "m": 16,
+     "seed": 1671433842715395432,
+     "weight": 62
+    },
+    "speedup": 1.3448931628151355,
+    "paired_ratio": 1.3448931628151355,
+    "baseline_ns": 18576.000817120075,
+    "median_ns": 13812.250170293617,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 9,
+    "case": {
+     "layer": "router",
+     "load": "decode 16",
+     "m": 16,
+     "seed": 1671450552613496292,
+     "weight": 62
+    },
+    "speedup": 3.140790397883925,
+    "paired_ratio": 3.140790397883925,
+    "baseline_ns": 14767.99976080656,
+    "median_ns": 4702.001053860948,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 10,
+    "case": {
+     "layer": "qkv_gate",
+     "load": "decode 32",
+     "m": 32,
+     "seed": 1671467262511597153,
+     "weight": 62
+    },
+    "speedup": 1.3246884054739834,
+    "paired_ratio": 1.3246884054739834,
+    "baseline_ns": 13952.000997960567,
+    "median_ns": 10532.288906815364,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 11,
+    "case": {
+     "layer": "o",
+     "load": "decode 32",
+     "m": 32,
+     "seed": 1671483972409698015,
+     "weight": 62
+    },
+    "speedup": 1.1552446278921287,
+    "paired_ratio": 1.1552446278921287,
+    "baseline_ns": 6623.999681323767,
+    "median_ns": 5733.850235174852,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 12,
+    "case": {
+     "layer": "pooler",
+     "load": "decode 32",
+     "m": 32,
+     "seed": 1671500682307798878,
+     "weight": 62
+    },
+    "speedup": 1.4470551024941165,
+    "paired_ratio": 1.4470551024941165,
+    "baseline_ns": 21968.000568449497,
+    "median_ns": 15181.177641809129,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 13,
+    "case": {
+     "layer": "unpooler",
+     "load": "decode 32",
+     "m": 32,
+     "seed": 1671517392205899742,
+     "weight": 62
+    },
+    "speedup": 1.3004997817335457,
+    "paired_ratio": 1.3004997817335457,
+    "baseline_ns": 18864.000216126442,
+    "median_ns": 14505.192912051878,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 14,
+    "case": {
+     "layer": "router",
+     "load": "decode 32",
+     "m": 32,
+     "seed": 1671534102104000607,
+     "weight": 62
+    },
+    "speedup": 2.7745003089398708,
+    "paired_ratio": 2.7745003089398708,
+    "baseline_ns": 15376.000199466944,
+    "median_ns": 5541.89889614468,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 15,
+    "case": {
+     "layer": "qkv_gate",
+     "load": "verify 1",
+     "m": 8,
+     "seed": 1671550812002101473,
+     "weight": 62
+    },
+    "speedup": 1.5283022537615354,
+    "paired_ratio": 1.5283022537615354,
+    "baseline_ns": 14399.999752640724,
+    "median_ns": 9422.219797948155,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 16,
+    "case": {
+     "layer": "o",
+     "load": "verify 1",
+     "m": 8,
+     "seed": 1671567521900202340,
+     "weight": 62
+    },
+    "speedup": 1.2907584076502219,
+    "paired_ratio": 1.2907584076502219,
+    "baseline_ns": 6591.999903321266,
+    "median_ns": 5107.074929166457,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 17,
+    "case": {
+     "layer": "pooler",
+     "load": "verify 1",
+     "m": 8,
+     "seed": 1671584231798303208,
+     "weight": 62
+    },
+    "speedup": 1.5671968454914356,
+    "paired_ratio": 1.5671968454914356,
+    "baseline_ns": 21504.000760614872,
+    "median_ns": 13721.314474616449,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 18,
+    "case": {
+     "layer": "unpooler",
+     "load": "verify 1",
+     "m": 8,
+     "seed": 1671600941696404077,
+     "weight": 62
+    },
+    "speedup": 1.658573326786829,
+    "paired_ratio": 1.6585733267868288,
+    "baseline_ns": 7039.9995893239975,
+    "median_ns": 4244.611604216897,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 19,
+    "case": {
+     "layer": "router",
+     "load": "verify 1",
+     "m": 8,
+     "seed": 1671617651594504947,
+     "weight": 62
+    },
+    "speedup": 6.327351571820099,
+    "paired_ratio": 6.327351571820099,
+    "baseline_ns": 26240.000501275063,
+    "median_ns": 4147.074839043119,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 20,
+    "case": {
+     "layer": "qkv_gate",
+     "load": "verify 16",
+     "m": 128,
+     "seed": 1671634361492605818,
+     "weight": 62
+    },
+    "speedup": 1.2425593464237357,
+    "paired_ratio": 1.2425593464237357,
+    "baseline_ns": 17503.999639302492,
+    "median_ns": 14087.053217765026,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 21,
+    "case": {
+     "layer": "o",
+     "load": "verify 16",
+     "m": 128,
+     "seed": 1671651071390706690,
+     "weight": 62
+    },
+    "speedup": 1.1269040854001595,
+    "paired_ratio": 1.1269040854001595,
+    "baseline_ns": 7455.999962985516,
+    "median_ns": 6616.357203406462,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 22,
+    "case": {
+     "layer": "pooler",
+     "load": "verify 16",
+     "m": 128,
+     "seed": 1671667781288807563,
+     "weight": 62
+    },
+    "speedup": 1.215078034854521,
+    "paired_ratio": 1.215078034854521,
+    "baseline_ns": 25360.00031977892,
+    "median_ns": 20871.087775704236,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 23,
+    "case": {
+     "layer": "unpooler",
+     "load": "verify 16",
+     "m": 128,
+     "seed": 1671684491186908437,
+     "weight": 62
+    },
+    "speedup": 1.0371064867474944,
+    "paired_ratio": 1.0371064867474944,
+    "baseline_ns": 19983.99943113327,
+    "median_ns": 19268.99473342008,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 24,
+    "case": {
+     "layer": "router",
+     "load": "verify 16",
+     "m": 128,
+     "seed": 1671701201085009312,
+     "weight": 62
+    },
+    "speedup": 2.757042763990703,
+    "paired_ratio": 2.757042763990703,
+    "baseline_ns": 16223.999205976725,
+    "median_ns": 5884.565672276033,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 25,
+    "case": {
+     "layer": "qkv_gate",
+     "load": "verify 32",
+     "m": 256,
+     "seed": 1671717910983110188,
+     "weight": 62
+    },
+    "speedup": 1.148046849228035,
+    "paired_ratio": 1.148046849228035,
+    "baseline_ns": 19791.999366134405,
+    "median_ns": 17239.714023380548,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 26,
+    "case": {
+     "layer": "o",
+     "load": "verify 32",
+     "m": 256,
+     "seed": 1671734620881211065,
+     "weight": 62
+    },
+    "speedup": 1.056567526683739,
+    "paired_ratio": 1.056567526683739,
+    "baseline_ns": 9664.000011980534,
+    "median_ns": 9146.599500661396,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 27,
+    "case": {
+     "layer": "pooler",
+     "load": "verify 32",
+     "m": 256,
+     "seed": 1671751330779311943,
+     "weight": 62
+    },
+    "speedup": 1.2845336716583455,
+    "paired_ratio": 1.2845336716583455,
+    "baseline_ns": 30799.998436123133,
+    "median_ns": 23977.571873503348,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 28,
+    "case": {
+     "layer": "unpooler",
+     "load": "verify 32",
+     "m": 256,
+     "seed": 1671768040677412822,
+     "weight": 62
+    },
+    "speedup": 1.0599277278336796,
+    "paired_ratio": 1.0599277278336796,
+    "baseline_ns": 24127.99885496497,
+    "median_ns": 22763.815136979847,
+    "status": "pass"
+   },
+   {
+    "event": "benchmark",
+    "index": 29,
+    "case": {
+     "layer": "router",
+     "load": "verify 32",
+     "m": 256,
+     "seed": 1671784750575513702,
+     "weight": 62
+    },
+    "speedup": 2.428792398059473,
+    "paired_ratio": 2.428792398059473,
+    "baseline_ns": 17599.99990463257,
+    "median_ns": 7246.399452952176,
+    "status": "pass"
+   }
+  ],
+  "returncode": 0,
+  "score_us": 3098.5362068935788,
+  "speedup": 1.5590587546637362,
+  "speedup_ci": [
+   1.53567287334378,
+   1.5824446359836921
+  ],
+  "status": "ok"
+ },
+ "started_at": 1793451851.4959688,
+ "status": "done",
+ "team": "PhilippMarquardt"
+}
