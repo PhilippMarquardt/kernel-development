@@ -149,10 +149,31 @@ def cmd_queue_status(args: Namespace, ctx: Context) -> Result:
     lines += [f"running {len(snap.running)}  queued {len(snap.queued)}  offenders(3h) {len(snap.offenders)}"]
     if snap.running or snap.queued:
         lines += _jobs_lines(snap.running + snap.queued, 12)
+    snap_q: dict = {}
+    try:
+        import time
+
+        from kdev.service import lockq
+        qv = lockq.view(get_config(ctx))
+        snap_q = qv.to_dict()
+        if qv.waiters or qv.holders:
+            lines.append(f"lock queue: {len(qv.waiters)} waiting, median hold {qv.median_hold_s:.0f}s"
+                         + (f" ({qv.n_holds} observed)" if qv.n_holds else " (default)")
+                         + f", ETA for a new job ~{qv.eta_s(None) / 60:.1f} min")
+            for h in qv.holders[:2]:
+                lines.append(f"  holder pid {h['pid']}: {h['cmdline'][:90]}")
+            for n, w in enumerate(qv.waiters[:10], 1):
+                pr = f" prio {w.priority}" if w.priority else ""
+                lines.append(f"  {n:2d}. {w.kind:7s} pid {w.owner_pid}{pr} waiting {time.time() - w.started:5.0f}s: "
+                             f"{w.cmdline[:70]}")
+            if len(qv.waiters) > 10:
+                lines.append(f"  ... {len(qv.waiters) - 10} more (--json)")
+    except Exception as e:  # noqa: BLE001
+        snap_q = {"error": str(e)}
     for o in snap.offenders[:3]:
         lines.append(f"offender {o['ts_utc']} pid {o['pid']} {o['action']}: {(o.get('cmdline') or '')[:70]}")
     verdict = "busy" if snap.running else ("idle" if d.get("alive") else "down")
-    return Result(tool="queue status", verdict=verdict, summary=snap.to_dict(), lines=lines,
+    return Result(tool="queue status", verdict=verdict, summary=dict(snap.to_dict(), lock_queue=snap_q), lines=lines,
                   next=[] if d.get("alive") else ["kdev serve start"])
 
 

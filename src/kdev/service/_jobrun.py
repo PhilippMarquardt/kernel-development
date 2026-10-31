@@ -269,18 +269,44 @@ def run_gpu(cfg: Config, spec: JobSpec, rd: Any, *, cancel_fn: Flag = _never, st
 
     lock_wait = spec.timeout_s if lock_timeout_s is None else lock_timeout_s
     try:
+        def progress(msg: str) -> None:
+            _log(rd, msg)
+            ev("waiting", msg)
+            lock._stderr_progress(msg)
+
         with lock.exclusive_abortable(cfg, timeout_s=lock_wait, job_id=spec.job_id, apps_fn=apps,
                                       abort=lambda: cancel_fn() or stop_fn(),
-                                      own_pids_fn=lambda: {os.getpid()}) as grant:
+                                      own_pids_fn=lambda: {os.getpid()}, priority=spec.priority,
+                                      agent=spec.agent or "", progress=progress) as grant:
             _log(rd, f"GPU_EXCLUSIVE=OK waited={grant.waited_s:.0f}s exclusive={grant.exclusive}")
             ev("started", f"lock granted ({grant.exclusive}, waited {grant.waited_s:.1f}s)")
             out = _run_locked_child(cfg, spec, rd, grant, cancel_fn, stop_fn, on_pid, ev, apps)
+        _attach_queue(out.result, grant)
     except KdevError as e:
         res = error_result(spec, rd, e.code, e.message, e.recovery, e.details)
         save_result(cfg, rd, res)
         return GpuOutcome(res, state_for(res))
     save_result(cfg, rd, out.result)
     return out
+
+
+def _attach_queue(res: Result, grant: lock.LockGrant) -> None:
+    """Lock wait facts on the Result: summary.lock + one output line when the wait was noticeable."""
+    q = dict(grant.queue or {})
+    q["waited_s"] = grant.waited_s
+    try:
+        res.summary = dict(res.summary or {})
+        res.summary["lock"] = q
+        if grant.waited_s >= 10:
+            pos = q.get("position")
+            eta = q.get("eta_s")
+            res.lines = list(res.lines or []) + [
+                f"lock: waited {grant.waited_s:.0f}s (queue position {pos if pos else '?'} of "
+                f"{q.get('queue_len', '?')} at start, ETA then ~{(eta or 0) / 60:.1f} min"
+                + (f", deferred to higher-priority kdev pid(s) {q['deferred_to']}" if q.get("deferred_to") else "")
+                + ")"]
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _child_argv(cfg: Config, spec: JobSpec, rd: Any) -> tuple[list[str], str]:

@@ -51,6 +51,7 @@ class LockGrant:
     waited_s: float
     offenders: list[ComputeApp] = field(default_factory=list)
     lock_path: str = ""
+    queue: dict[str, Any] = field(default_factory=dict)   # position/ETA at the start of the wait (lockq)
 
 
 ComputeAppsFn = Callable[[], list[ComputeApp]]
@@ -279,15 +280,102 @@ def _own_pids() -> set[int]:
     return {me} | descendants(me)
 
 
+class _Waiter:
+    """Queue bookkeeping while waiting for the flock: position/ETA reports (``progress``), holder-change
+    observations (hold durations for the ETA) and the kdev priority gate. Never raises."""
+
+    REPORT_S = 30.0
+    SCAN_S = 5.0
+
+    def __init__(self, cfg: Config, priority: int, entry: Any, progress: Callable[[str], None] | None,
+                 qinfo: dict[str, Any]) -> None:
+        self.cfg, self.priority, self.entry, self.progress, self.qinfo = cfg, int(priority or 0), entry, progress, qinfo
+        self.t_scan = self.t_report = 0.0
+        self.key: str | None = None
+        self.key_t = 0.0
+        self.first_key = True
+
+    def scan(self, report: bool = False) -> None:
+        from kdev.service import lockq  # noqa: PLC0415
+
+        try:
+            qv = lockq.view(self.cfg)
+        except Exception:  # noqa: BLE001
+            return
+        now = time.monotonic()
+        k = lockq.holder_key(qv)
+        if k != self.key:
+            # a hold is recorded only when we saw it start (not the holder found at our first scan)
+            if self.key and not self.first_key:
+                lockq.record_hold(self.cfg, self.key, now - self.key_t)
+            self.first_key = self.key is None
+            self.key, self.key_t = k, now
+        pos = qv.position(os.getpid())
+        if not self.qinfo:
+            self.qinfo.update(position=pos, queue_len=len(qv.waiters), eta_s=qv.eta_s(pos),
+                              median_hold_s=qv.median_hold_s, holders=[h["cmdline"][:80] for h in qv.holders])
+        self.qinfo.update(last_position=pos, last_eta_s=qv.eta_s(pos))
+        if report and self.progress is not None:
+            try:
+                self.progress(lockq.describe(qv))
+            except Exception:  # noqa: BLE001
+                pass
+
+    def tick(self) -> None:
+        now = time.monotonic()
+        if now - self.t_scan >= self.SCAN_S:
+            rep = now - self.t_report >= self.REPORT_S
+            self.t_scan = now
+            if rep:
+                self.t_report = now
+            self.scan(report=rep)
+
+    def blocked_by_priority(self) -> bool:
+        from kdev.service import lockq  # noqa: PLC0415
+
+        hp = lockq.higher_priority_waiting(self.cfg, self.priority)
+        if hp:
+            self.qinfo.setdefault("deferred_to", sorted({int(d["pid"]) for d in hp}))
+            self.tick()
+        return bool(hp)
+
+    def done(self) -> None:
+        from kdev.service import lockq  # noqa: PLC0415
+
+        lockq.mark(self.entry, "granted")
+
+
+def _queue_waiter(cfg: Config, priority: int | None, job_id: str | None, agent: str,
+                  progress: Callable[[str], None] | None, qinfo: dict[str, Any]) -> tuple[Any, _Waiter]:
+    entry = None
+    if sys.platform != "win32":
+        from kdev.service import lockq  # noqa: PLC0415
+
+        entry = lockq.register(cfg, priority=int(priority or 0), job_id=job_id, agent=agent)
+    w = _Waiter(cfg, int(priority or 0), entry, progress, qinfo)
+    if sys.platform != "win32":
+        w.scan(report=True)
+        w.t_scan = w.t_report = time.monotonic()
+    return entry, w
+
+
+def _stderr_progress(msg: str) -> None:
+    print(f"kdev: {msg}", file=sys.stderr, flush=True)
+
+
 def _exclusive_gen(cfg: Config, *, timeout_s: float | None = None, job_id: str | None = None,
                    apps_fn: ComputeAppsFn = compute_apps, poll_s: float = 2.0,
                    abort: Callable[[], bool] | None = None,
-                   own_pids_fn: Callable[[], set[int]] | None = None) -> Iterator[LockGrant]:
+                   own_pids_fn: Callable[[], set[int]] | None = None, priority: int | None = None,
+                   agent: str = "", progress: Callable[[str], None] | None = _stderr_progress
+                   ) -> Iterator[LockGrant]:
     own_fn = own_pids_fn or _own_pids
     if apps_fn is _COMPUTE_APPS_DEF:          # default: resolve at call time (monkeypatchable module attr)
         apps_fn = lambda: globals()["compute_apps"]()  # noqa: E731
     t0 = time.monotonic()
     lk = _FileLock(cfg.lock_path)
+    qinfo: dict[str, Any] = {}
+    entry = None
     try:
         def _stop() -> None:
             if timeout_s is not None and time.monotonic() - t0 > timeout_s:
@@ -299,7 +387,15 @@ def _exclusive_gen(cfg: Config, *, timeout_s: float | None = None, job_id: str |
             if abort is not None and abort():
                 raise KdevError(ErrorCode.CANCELLED, "cancelled while waiting for the GPU lock")
 
-        lk.acquire_waiting(_stop, min(0.2, poll_s))
+        if lk.try_acquire():
+            qinfo.update(position=0, queue_len=0, eta_s=0)
+        else:
+            entry, waiter = _queue_waiter(cfg, priority, job_id, agent, progress, qinfo)
+            while sys.platform != "win32" and priority is not None and waiter.blocked_by_priority():
+                _stop()
+                time.sleep(1.0)
+            lk.acquire_waiting(lambda: (_stop(), waiter.tick()), min(0.2, poll_s))
+            waiter.done()
         t_lock = time.monotonic()
         seen: dict[int, ComputeApp] = {}       # logged offenders
         everseen: dict[int, ComputeApp] = {}   # every foreign app that delayed us
@@ -331,11 +427,15 @@ def _exclusive_gen(cfg: Config, *, timeout_s: float | None = None, job_id: str |
                 raise KdevError(ErrorCode.CANCELLED, "cancelled while waiting for foreign CUDA contexts")
             time.sleep(poll_s)
         grant = LockGrant(exclusive="waited" if waited else "ok", waited_s=round(time.monotonic() - t0, 1),
-                          offenders=list(everseen.values()), lock_path=cfg.lock_path)
+                          offenders=list(everseen.values()), lock_path=cfg.lock_path, queue=dict(qinfo))
         grant._fd = lk.fd  # type: ignore[attr-defined]  # handed to the child (pass_fds) like gpu_run.sh fd 9
         yield grant
     finally:
         lk.release()
+        if entry is not None:
+            from kdev.service import lockq  # noqa: PLC0415
+
+            lockq.unregister(entry)
 
 
 @contextmanager
