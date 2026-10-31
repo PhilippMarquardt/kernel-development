@@ -116,3 +116,26 @@ means of the 2 runs; and vs the published `all_calib.md` local columns:
 | attention | base us | median 0.43 %, 11/12 within 2 % (d1 sliding, layout) | median 0.34 %, 11/12 |
 
 Self-noise for reference: calib.py run-to-run sub us median 0.55 % (max 1.7 %), kdev 0.44 %.
+
+## 8. Judge gap vs local (pod H200, 2026-10-31, same session) and the calibration table
+
+bf16 `best_1.567.py` vs its judge JSON (`62921d1af0fe4904`, sfo3), 40 reps, calib.py and `kdev calib`
+interleaved twice (calib.py, kdev, calib.py, kdev), means of the 2 runs:
+
+| comparison (30 shapes) | sub us | base us | speedup |
+|---|---|---|---|
+| kdev vs calib.py (same session) | median 0.66 %, 28/30 within 2 % | 0.43 %, 29/30 | 0.84 %, 26/30 |
+| run-to-run self-noise (calib.py / kdev) | 0.69 % / 0.49 % | 0.47 % / 0.57 % | 0.57 % / 0.99 % |
+| kdev vs judge | median 2.62 %, 11/30 within 2 %, max 16.5 % | 2.28 %, 12/30, max 12.9 % | 2.63 %, 13/30 |
+| calib.py vs judge | median 2.56 %, 12/30, max 16.2 % | 2.62 %, 14/30, max 12.5 % | 2.29 %, 12/30 |
+
+Verdict: kdev reproduces calib.py (the two >2 % shapes, verify 1/o +0.27 us and verify 1/unpooler +0.1 us,
+are consistent across runs: placement-sensitive small shapes, see section 6); both differ from the judge
+by the same amount. The gap is judge-side and per shape: local is slower on 3-6 us shapes (unpooler/router
+m1 +0.5 us = 16 %; the judge subtracts its per-shape `2*one - two` = 3.8-4.4 us instead of 4.0, which
+explains up to 0.4 us of it), and the local SGLang baseline is slower than the judge's on router shapes
+(+1.1-1.9 us, 7-13 %) and attention sliding shapes (~5 %). It is therefore recorded, not corrected:
+`kdev calib` stores judge/local per case for the submission and the baseline separately in
+`$KDEV_HOME/calib/<problem>.json`; `time`/`ab` print `~J` = local us x median ratio (uncertainty
+max(1.5 %, half the observed spread), + 0.3 us/us on shapes < 6 us, flagged `?`). Use absolute sub us
+(and `~J`) to predict the judge; never local speedups on baseline-gap shapes.

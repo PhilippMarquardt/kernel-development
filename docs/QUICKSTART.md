@@ -8,7 +8,9 @@ kdev runs on the GPU pod (`ssh -i ~/.ssh/runpod_ed25519 -p PORT root@HOST`; inst
 
 GPU commands (`check`, `time`, `ab`, `calib`, `dispatch`, ...) queue behind the shared `/root/gpu.lock`, the
 same lock `/root/gpu_run.sh` uses. They never compile while holding it. Build first; for long runs use
-`--detach` and then `kdev job wait JOB`.
+`--detach` and then `kdev job wait JOB`. While waiting they print the queue position and ETA every 30 s
+(`kdev queue status` lists the whole lock queue); `--priority N` makes a job go before lower-priority kdev
+jobs (gpu_run.sh jobs keep their kernel queue order).
 
 ## The 10 commands, in order
 
@@ -19,10 +21,10 @@ same lock `/root/gpu_run.sh` uses. They never compile while holding it. Build fi
 | 3 | `kdev build FILE [FILE2]` | Compiles with the pinned toolchain into a hash-keyed cache. Reports regs, spills and C751x. Every GPU command needs it (`needs_build` otherwise). Extensions that are built inside `prepare()` or on the first call are found by short GPU discovery jobs: build, discover, rebuild, until the discovery comes back `complete`. Nothing compiles while the GPU lock is held. If a GPU job reports `needs_build`, run `kdev build` again. |
 | 4 | `kdev check FILE` | Correctness: fresh seeds, extra shapes, eager and graph, repeats. Reports `nondeterministic` (ulp ≤ 1 is fine), `intermittent` or `wrong`. |
 | 5 | `kdev time FILE` | Judge-protocol timing against `baseline.py`: graph replay, 256 MB read flush, 4.0 us overhead, 5 seeds, exclusive GPU. It also runs a dispatch probe in a separate process and reports which kernels actually ran for each shape. |
-| 6 | `kdev calib FILE:JUDGE.json` | Compares local and judge results per shape. On a `DISAGREE`, explain it before you trust local A/B on that problem. |
+| 6 | `kdev calib FILE:JUDGE.json` | Compares local and judge results per shape (sub and baseline us separately) and records the per-shape judge/local ratio in the calibration table (`kdev calib table PROBLEM`). `time`/`ab` then add a `~J` column (estimated judge us; `?` = shape < 6 us, overhead-dominated). Local and judge differ per shape by ~2.5 % median (judge-side: per-shape overhead, node, its faster SGLang baseline), so compare absolute sub us, not local speedups. On a `DISAGREE`, explain it before you trust local A/B on that problem. |
 | 7 | `kdev ab BEST.py CAND.py [--set B:K=V]` | Interleaved ABBA run with paired-ratio CIs. `faster`/`slower`/`same` come from the CI. This is the only way to compare two files. |
-| 8 | `kdev sweep FILE --grid "K=a,b K2=c"` | Searches cheap knobs exhaustively before any rewrite. Builds in parallel, quick-checks, then batches an ab against the base. |
-| 9 | `kdev sass FILE --kernel RE --loops` (+ `kdev sass diff A B`) | Hot-loop opcode mix and audits (pdl, spills, serialize, repeat, invariant). You need it for any "at the limit" claim. |
+| 8 | `kdev sweep FILE --grid "K=a,b K2=c"` | Searches cheap knobs exhaustively before any rewrite. Builds in parallel, runs the prepare-time discovery per point (short GPU jobs; `--no-discover` skips), quick-checks, then batches an ab against the base. |
+| 9 | `kdev sass FILE --kernel RE --loops` (+ `kdev sass diff A B`) | Hot-loop opcode mix and audits (pdl, spills, serialize, repeat, invariant). You need it for any "at the limit" claim. The pdl audit names the parameter each pre-wait load reads (`p.seq_lens x8 (cuda.cu:2444 ...)`); a read-only input is allowlisted in the source with `// kdev:pdl-allow seq_lens -- why` (or `FILE.pdl-allow`). |
 | 10 | `kdev note "CLAIM" --kind limit --evidence RUN_SASS,RUN_SWEEP` / `kdev idea resolve ID ...` | Writes the result, with its run ids and the exact variant, to the board. |
 
 Supporting commands: `kdev dispatch FILE`, `kdev regs FILE`, `kdev floor --shape S`, `kdev timeline FILE`,
