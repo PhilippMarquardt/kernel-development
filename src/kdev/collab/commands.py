@@ -76,16 +76,17 @@ def cmd_board_post(args: Namespace, ctx: Context) -> Result:
     from kdev.collab.refs import parse_refs
     refs = parse_refs(args.ref)
     agent = _agent(ctx)
+    prob = _problem(ctx) or board.infer_problem([r.get("ref", "") for r in refs if r.get("kind") == "file"])
     with _conn(ctx) as c:
-        p, conflicts, closed = board.post(c, agent=agent, kind=args.kind, body=args.text, problem=_problem(ctx),
+        p, conflicts, closed = board.post(c, agent=agent, kind=args.kind, body=args.text, problem=prob,
                                           to=args.to, refs=refs, reply_to=args.reply_to, files=args.files,
                                           shapes=args.shapes, ttl_s=_duration_s(args.ttl, board.DEFAULT_TTL_S),
                                           exclusive=args.exclusive, source=ctx.via)
         entry = None
         if args.doc:
-            name = docs.doc_name(args.doc, _problem(ctx))
+            name = docs.doc_name(args.doc, prob)
             entry = docs.append(c, name, args.section or "Board", f"[{p.kind} #{p.post_id}] {args.text}",
-                                author=agent, problem=_problem(ctx), refs=refs)
+                                author=agent, problem=prob, refs=refs)
         unread = len(board.inbox(c, agent)) if agent else 0
     lines = [p.line(200)]
     warnings = []

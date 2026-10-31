@@ -4,7 +4,10 @@ Agents talk to each other directly on the **board** and write shared knowledge t
 `$KDEV_HOME/collab.db` (SQLite, WAL, `BEGIN IMMEDIATE` + retries: many agents on one pod can write at the same
 time). Remote agents use the same commands over ssh: `kdev remote -- kdev board inbox --agent me`.
 Your name is `--agent NAME` or `$KDEV_AGENT`. The problem is `--problem P`; a directory path is stored as
-its basename.
+its basename. Without `--problem`, a post takes `$KDEV_PROBLEM`, else the OKC problem of a `--ref` file or of
+the working directory (`.../okc/muse_*/`). `--problem` filters match aliases exactly (`bf16_proj` ==
+`muse_bf16_proj`) and keep only those unscoped posts that are decisions, come from agents who posted on that
+problem, or come from agents who never scoped a post.
 
 ## Agent protocol (paste into briefs)
 

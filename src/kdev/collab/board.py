@@ -116,6 +116,39 @@ def _short_problem(p: str) -> str:
     return b[5:] if b.startswith("muse_") else b
 
 
+def problem_aliases(p: str) -> list[str]:
+    """Stored spellings of one problem: basename, short (muse_ stripped) and muse_-prefixed."""
+    b = os.path.basename(str(p).replace("\\", "/").rstrip("/")) or str(p)
+    sp = _short_problem(b)
+    return sorted({b, sp, "muse_" + sp})
+
+
+def problem_filter(problem: str) -> tuple[str, list[str]]:
+    """SQL filter for ``--problem``: posts of that problem (exact, alias-normalised: bf16_proj ==
+    muse_bf16_proj, never a suffix match) plus unscoped posts that belong to nobody else: decisions
+    (broadcasts), posts by agents who posted on this problem, and posts by agents who never scoped a post."""
+    al = problem_aliases(problem)
+    q = ",".join("?" * len(al))
+    w = (f"(problem IN ({q}) OR ((problem IS NULL OR problem='') AND (kind='decision' "
+         f"OR agent IN (SELECT agent FROM posts WHERE problem IN ({q})) "
+         "OR agent NOT IN (SELECT agent FROM posts WHERE problem IS NOT NULL AND problem<>''))))")
+    return w, al + al
+
+
+def infer_problem(paths: list[str] | None = None, cwd: str | None = None) -> str | None:
+    """Problem of a post made without --problem: $KDEV_PROBLEM, else the OKC problem a referenced path or the
+    working directory lies in (``.../okc/<problem>/...``)."""
+    env = os.environ.get("KDEV_PROBLEM", "").strip()
+    if env:
+        return os.path.basename(env.rstrip("/")) or env
+    for p in list(paths or []) + [cwd or os.getcwd()]:
+        parts = str(p).replace("\\", "/").split("/")
+        for i, part in enumerate(parts[:-1]):
+            if part == "okc" and parts[i + 1].startswith("muse_"):
+                return parts[i + 1]
+    return None
+
+
 def _ref_short(r: dict[str, Any]) -> str:
     from kdev.collab.refs import short
     return short(r)
@@ -328,8 +361,9 @@ def read(conn: sqlite3.Connection, *, problem: str | None = None, kind: str | No
     after that agent's cursor and not by them (the cursor moves to the newest post when ``advance``)."""
     where, params = ["1=1"], []
     if problem:
-        where.append("(problem IS NULL OR problem='' OR problem=? OR problem LIKE ?)")
-        params += [problem, "%" + _short_problem(problem)]
+        w, ps = problem_filter(problem)
+        where.append(w)
+        params += ps
     if kind:
         ks = [k.strip().lower() for k in kind.split(",") if k.strip()]
         where.append(f"kind IN ({','.join('?' * len(ks))})")
@@ -404,8 +438,9 @@ def search(conn: sqlite3.Connection, query: str, *, problem: str | None = None, 
             return []
         where.append(f"post_id IN ({','.join(str(i) for i in ids)})")
     if problem:
-        where.append("(problem=? OR problem LIKE ?)")
-        params += [problem, "%" + _short_problem(problem)]
+        w, ps = problem_filter(problem)
+        where.append(w)
+        params += ps
     if kind:
         where.append("kind=?")
         params.append(kind.lower())
