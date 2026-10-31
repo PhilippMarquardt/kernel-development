@@ -256,16 +256,38 @@ def _so_in(d: str, name: str) -> str:
     return ""
 
 
+_ACTIVE: list = []          # [Hook] once installed in this process
+
+
+_CONFIG_FIELDS = ("mode", "ext_root", "tc_version", "tc_ptxas", "knobs", "defines", "force", "allow_jit",
+                  "extra_cuda_flags")
+
+
+def active():
+    """The hook installed in this process, or None."""
+    return _ACTIVE[0] if _ACTIVE else None
+
+
 def install(hook: Hook):
-    """Patch torch.utils.cpp_extension.load_inline/load with ``hook`` (imports torch). Returns the hook."""
+    """Patch torch.utils.cpp_extension.load_inline/load with ``hook`` (imports torch). Returns the active hook.
+
+    If a hook is already installed, its configuration is replaced by ``hook``'s and the *installed* hook is
+    returned: submissions bind ``load_inline`` at import time (``from torch.utils.cpp_extension import ...``),
+    so the patched functions must stay the same objects for the whole process."""
     from torch.utils import cpp_extension as ce  # noqa: PLC0415 - runs in the pinned interpreter only
 
+    cur = active()
+    if cur is not None and all(getattr(getattr(ce, k), "__kdev_hook__", False) for k in ("load_inline", "load")):
+        for k in _CONFIG_FIELDS:
+            setattr(cur, k, getattr(hook, k))
+        return cur
     for kind in ("load_inline", "load"):
-        cur = getattr(ce, kind)
-        if getattr(cur, "__kdev_hook__", False):
+        f = getattr(ce, kind)
+        if getattr(f, "__kdev_hook__", False):
             continue
-        hook.real[kind] = cur
+        hook.real[kind] = f
         setattr(ce, kind, hook.make(kind))
+    _ACTIVE[:] = [hook]
     return hook
 
 

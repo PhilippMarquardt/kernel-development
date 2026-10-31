@@ -219,27 +219,18 @@ def use_prebuilt(spec: JobSpec, f: Any) -> Any:
     if os.environ.get("KDEV_NO_BUILD_HOOK") == "1":
         return None
     try:
-        from torch.utils import cpp_extension as ce
-
-        from kdev.build import _shim
-        from kdev.build.cache import install_load_inline_hook
+        from kdev.build.cache import install_load_inline_hook, select_variant
         from kdev.build.toolchain import pin_for
     except Exception:  # noqa: BLE001 - optional integration
         return None
-    cur = getattr(ce, "load_inline", None)
-    if getattr(cur, "__kdev_hook__", False):
-        for cell in getattr(cur, "__closure__", None) or ():
-            obj = cell.cell_contents
-            if isinstance(obj, _shim.Hook):
-                obj.knobs = dict(f.knobs or {})
-                obj.defines = list(f.defines or [])
-                return obj
-        return None
+    hook = select_variant(f)
+    if hook is not None:
+        return hook
     allow = bool((spec.params or {}).get("allow_jit")) or not spec.requires_prebuilt
     try:
         return install_load_inline_hook(f, pin_for(spec.problem, f.path), os.environ.get("KDEV_HOME"),
                                         allow_jit=allow)
-    except NotImplementedError:
+    except (NotImplementedError, ImportError):    # no torch in this interpreter (unit tests)
         return None
 
 

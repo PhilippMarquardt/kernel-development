@@ -170,3 +170,19 @@ def install_load_inline_hook(f: FileRef | None = None, toolchain: Toolchain | No
                       defines=json.loads(env["KDEV_DEFINES"] or "[]"),
                       allow_jit=allow_jit or env.get("KDEV_ALLOW_JIT") == "1")
     return _shim.install(hook)
+
+
+def active_hook() -> _shim.Hook | None:
+    """The load_inline hook installed in this (worker) process, or None. Public P5 API (P6 use_prebuilt)."""
+    return _shim.active()
+
+
+def select_variant(f: FileRef) -> _shim.Hook | None:
+    """Switch the installed hook to FileRef ``f``'s knobs/defines, so the next load_inline/load in this process
+    resolves to that file's prebuilt variant (several files of one job: timeline --ab, marked + plain).
+    Returns the hook, or None when no hook is installed (call :func:`install_load_inline_hook` then)."""
+    hook = _shim.active()
+    if hook is not None:
+        hook.knobs = dict(f.knobs or {})
+        hook.defines = list(f.defines or [])
+    return hook
