@@ -242,10 +242,9 @@ def execute(spec: JobSpec, run_dir_path: str | None = None) -> Result:
         res.files.setdefault("raw", str(rp / "raw.jsonl"))
     res.summary.setdefault("elapsed_s", round(time.time() - t0, 1))
     try:
-        d = res.to_dict()
-        if res.lines:
-            d["lines"] = res.lines
-        write_json(run_dir, "result.json", d)
+        from kdev.runs import write_result_files
+
+        write_result_files(rp, res)
     except Exception as e:  # noqa: BLE001
         log(run_dir, f"result.json failed: {e}")
     return res

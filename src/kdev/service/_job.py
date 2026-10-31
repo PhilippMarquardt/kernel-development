@@ -26,6 +26,14 @@ def _run_dir(path: Path):
         return _RunDirFallback(path.name, path)
 
 
+def _write_result(d: Path, res: Result) -> None:
+    try:
+        from kdev.runs import write_result_files
+        write_result_files(d, res)
+    except ImportError:          # P1 runs unavailable
+        write_json(d / "result.json", res.to_dict())
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="kdev.service._job")
     ap.add_argument("job")
@@ -48,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
         res = Result.from_error(spec.kind, KdevError(ErrorCode.INTERNAL, f"{type(e).__name__}: {e}"))
     res.job_id = spec.job_id
     res.run_id = res.run_id or rd.run_id
-    write_json(Path(a.run_dir) / "result.json", res.to_dict())
+    _write_result(Path(a.run_dir), res)
     return res.exit_code
 
 

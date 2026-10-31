@@ -117,7 +117,11 @@ def save_result(cfg: Config, rd: Any, res: Result, *, ingest: bool = True) -> Pa
         res.files.setdefault("log", str(Path(rd.path) / "log.txt"))
     if (Path(rd.path) / "raw.jsonl").exists():
         res.files.setdefault("raw", str(Path(rd.path) / "raw.jsonl"))
-    write_json(p, res.to_dict())
+    try:
+        from kdev.runs import write_result_files
+        write_result_files(rd.path, res)
+    except ImportError:
+        write_json(p, res.to_dict())
     if ingest:
         try:
             from kdev.ledger.record import ingest_result
@@ -305,7 +309,7 @@ def _run_locked_child(cfg: Config, spec: JobSpec, rd: Any, grant: lock.LockGrant
     try:
         try:
             proc = lock.spawn(argv, lock_fd=getattr(grant, "_fd", None), stdout=log_f, stderr=subprocess.STDOUT,
-                              cwd=cwd, env=child_env(cfg, spec, no_cuda=False))
+                              cwd=cwd, env=dict(child_env(cfg, spec, no_cuda=False), KDEV_LOG_CAPTURED="1"))
         except (FileNotFoundError, PermissionError) as e:
             log_f.close()
             return GpuOutcome(error_result(spec, rd, ErrorCode.INVALID_REQUEST, f"cannot start {argv[0]}: {e}"),
@@ -370,6 +374,7 @@ def _run_locked_child(cfg: Config, spec: JobSpec, rd: Any, grant: lock.LockGrant
 
     # fidelity: exclusivity + clocks, as observed by the service (the worker cannot see the lock)
     timing = spec.kind in TIMING_KINDS
+    worker_clocks = bool(res.fidelity is not None and res.fidelity.clocks)
     if res.fidelity is not None or timing:
         fid = res.fidelity or Fidelity()
         fid.exclusive = "fail" if violators else grant.exclusive
@@ -377,7 +382,11 @@ def _run_locked_child(cfg: Config, spec: JobSpec, rd: Any, grant: lock.LockGrant
         if not fid.clocks:
             fid.clocks = {"before": before.to_dict(), "after": after.to_dict()}
         res.fidelity = fid
-    if smi.clocks_moved(before, after):
+    # The service samples before the worker starts, i.e. usually the idle clock (345 MHz on H200): idle ->
+    # boost is expected. Warn only on a drop (throttling), and only when the worker did not measure its own
+    # warmed-up clocks (the timing engine does, and warns itself).
+    if (not worker_clocks and smi.clocks_moved(before, after) and before.sm_mhz and after.sm_mhz
+            and after.sm_mhz < before.sm_mhz):
         res.warnings.append(f"SM clock moved {before.sm_mhz}->{after.sm_mhz} MHz during the run")
     if violators:
         res.warnings.append("NOT EXCLUSIVE: foreign CUDA process(es) during the run: "

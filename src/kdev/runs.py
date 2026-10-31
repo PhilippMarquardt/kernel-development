@@ -21,6 +21,29 @@ BUILTIN_SECTIONS = {"meta": "meta.json", "result": "result.json", "log": "log.tx
 MAX_LINE_CHARS = 400   # longer lines are clipped with an explicit marker
 
 
+def result_doc(result: Result) -> dict[str, Any]:
+    """The result.json document: the ``kdev.result/1`` envelope plus ``lines`` (the tool's own rendering,
+    which ``Result.to_dict`` leaves out of the stdout envelope). ``Result.from_dict`` restores ``lines``."""
+    d = result.to_dict()
+    if result.lines:
+        d["lines"] = list(result.lines)
+    return d
+
+
+def write_result_files(run_dir: str | os.PathLike[str], result: Result) -> Path:
+    """Write result.json (:func:`result_doc`) and summary.txt (what ``kdev show RUN`` prints) into
+    ``run_dir``. Every writer of result.json (CLI, worker, service, build lane) goes through this, so a run
+    always has both and they agree."""
+    from kdev.output import render
+
+    d = Path(run_dir)
+    try:
+        atomic_write_text(d / "summary.txt", render(result, quiet=False) + "\n")
+    except Exception:  # noqa: BLE001 - the summary is a convenience; never lose result.json over it
+        pass
+    return atomic_write_json(d / "result.json", result_doc(result))
+
+
 @dataclass
 class RunDir:
     run_id: str
@@ -51,11 +74,7 @@ class RunDir:
         for name, key in (("raw.jsonl", "raw"), ("log.txt", "log")):
             if key not in result.files and self.file(name).exists():
                 result.files[key] = str(self.file(name))
-        from kdev.output import render
-
-        # Result.lines is not part of the JSON envelope, so the tool's own rendering is kept as summary.txt
-        atomic_write_text(self.file("summary.txt"), render(result, quiet=False) + "\n")
-        return atomic_write_json(p, result.to_dict())
+        return write_result_files(self.path, result)
 
     def read_result(self) -> Result | None:
         p = self.file("result.json")

@@ -53,7 +53,8 @@ def log(run_dir: Any, msg: str) -> None:
     import time
 
     line = f"{time.strftime('%H:%M:%S')} {msg}"
-    print(line, file=sys.stderr, flush=True)
+    if os.environ.get("KDEV_LOG_CAPTURED") != "1":     # the GPU lane already appends our stderr to log.txt
+        print(line, file=sys.stderr, flush=True)
     try:
         p = run_path(run_dir) / "log.txt"
         p.parent.mkdir(parents=True, exist_ok=True)
