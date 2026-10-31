@@ -190,7 +190,8 @@ def select_shapes(adapter: Any, params: dict[str, Any], one: str | None = None) 
     shapes = list(adapter.shapes())
     flt = params.get("shapes")
     if flt:
-        shapes = [s for s in shapes if flt in s.shape_id or flt in json.dumps(s.case, sort_keys=True)]
+        fs = [f.strip() for f in str(flt).split(",") if f.strip()]      # comma = any of (as timing)
+        shapes = [s for s in shapes if any(f in s.shape_id or f in json.dumps(s.case, sort_keys=True) for f in fs)]
     if one:
         exact = [s for s in shapes if s.shape_id == one]
         shapes = exact or [s for s in shapes if one in s.shape_id]

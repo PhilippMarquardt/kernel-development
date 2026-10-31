@@ -242,8 +242,9 @@ def run_calib(spec: JobSpec, run_dir: Any) -> Result:
     ss = E.open_session(spec2, run_dir, files)
     # always the judge's shapes, in judge order (the adapter's own scored list is not used here)
     ss.shapes = [Shape(c["shape_id"], dict(c["case"]), weight=c["weight"], load=c["load"], seed=c["seed"])
-                 for c in extra["cases"] if not ss.params.shapes or ss.params.shapes in c["shape_id"]
-                 or ss.params.shapes in str(c["case"])]
+                 for c in extra["cases"] if not ss.params.shapes
+                 or any(f.strip() and (f.strip() in c["shape_id"] or f.strip() in str(c["case"]))
+                        for f in str(ss.params.shapes).split(","))]
     if hasattr(ss.adapter, "set_shapes"):
         ss.adapter.set_shapes(ss.shapes)
     try:
