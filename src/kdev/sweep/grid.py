@@ -1,7 +1,9 @@
 """Sweep grid + orchestration. Owner: P5.
 
 Flow: expand grid -> one build per point (parallel, outside the GPU lock; same hash-keyed cache the GPU lane
-checks) -> drop points failing build / spills / C751x (reason recorded) -> quick check (check job, 1 seed) ->
+checks) -> prepare-time discovery per built point (the `kdev build` loop: GPU discover job, rebuild the
+recorded calls, until complete; ``--no-discover`` skips it) -> drop points failing build / spills / C751x /
+still-pending discovery (reason recorded) -> quick check (check job, 1 seed) ->
 ab jobs in batches of <= 4 points + base, interleaved -> top K by score with CIs; full table in sweep.csv.
 Grid sources: "K=a,b K2=c" literal, or "cublaslt:SHAPE" (algorithm enumeration provided by the adapter, later).
 
@@ -42,6 +44,7 @@ class SweepPoint:
     reason: str = ""
     rel: float | None = None    # score / base score of the same batch
     regs_max: int | None = None
+    discover_rounds: int = 0    # prepare-time discovery rounds run for this point (kdev build loop)
 
 
 def _coerce(v: str) -> Any:
@@ -128,6 +131,40 @@ def build_points(file: str, points: list[SweepPoint], *, parallel: int, problem:
     return reps
 
 
+def discover_points(file: str, points: list[SweepPoint], reports: dict[str, Any], *, ctx: Any,
+                    problem: str | None, home: str | None, builder: Callable[..., Any] | None = None) -> list[str]:
+    """The prepare-time discovery of ``kdev build`` for every built point (its knobs reach prepare() as -D /
+    $KDEV_KNOBS, so each variant can build different extensions): GPU discover job -> rebuild the recorded
+    calls, until a pass is complete. A point still pending is dropped (``needs_build`` otherwise wastes its
+    check/ab job). Returns warnings; stops discovering when GPU jobs are unavailable."""
+    from kdev.build.discover import discover_loop  # noqa: PLC0415
+
+    if builder is None:
+        from kdev.build.compile import build_file as builder  # noqa: PLC0415
+    warns: list[str] = []
+    for p in points:
+        def rebuild(path: str, p: SweepPoint = p) -> Any:
+            return builder(path, knobs=p.knobs, problem=problem, home=home)
+
+        try:
+            rep, rounds, w = discover_loop(file, reports.get(p.label), rebuild, dict(p.knobs), [], ctx)
+        except Exception as e:  # noqa: BLE001 - no GPU route (fake/remote ctx): keep the plain builds
+            warns.append(f"discovery skipped: {type(e).__name__}: {str(e)[:120]}")
+            break
+        p.discover_rounds = len(rounds)
+        p.run_ids += [r["run_id"] for r in rounds if r.get("run_id")]
+        if w:
+            warns += [f"{p.label}: {x}" for x in w]
+            if any("skipped" in x for x in w):
+                break
+        if rounds and rounds[-1]["verdict"] != "complete":
+            p.build_status, p.reason = "needs_build", (f"prepare-time extensions still pending after "
+                                                       f"{len(rounds)} discovery round(s)")
+        elif rep is not None and not getattr(rep, "ok", True):
+            p.build_status, p.reason = "build_failed", "rebuild after discovery failed"
+    return warns
+
+
 # --------------------------------------------------------------------------------------------- GPU stages
 def _submit(ctx: Any, spec: JobSpec) -> Result:
     try:
@@ -189,8 +226,8 @@ def to_csv(points: list[SweepPoint]) -> str:
 
 def run_sweep(file: str, grid: dict[str, list[Any]], *, base: str | None, top: int, build_parallel: int,
               quick_check: bool, ctx: Any, dry_run: bool = False, builder: Callable[..., Any] | None = None,
-              drop: tuple[str, ...] = ("build_failed", "spills", "c751x"), params: dict[str, Any] | None = None
-              ) -> Result:
+              drop: tuple[str, ...] = ("build_failed", "spills", "c751x"), params: dict[str, Any] | None = None,
+              discover: bool = True) -> Result:
     """Client-side orchestration: parallel builds here (compile-only, no GPU), then check/ab jobs via
     ``ctx.submit`` (service GPU lane or direct flock mode). Without a GPU route the result stops after the
     build stage (verdict 'built_only'). Returns the sweep Result; ``summary['points']`` holds every point."""
@@ -218,9 +255,14 @@ def run_sweep(file: str, grid: dict[str, list[Any]], *, base: str | None, top: i
         return res
     run = _runs.new_run(ctx, "sweep", os.path.splitext(os.path.basename(file))[0])
     home = str(_runs.home(ctx))
-    build_points(file, points, parallel=build_parallel, problem=problem, home=home, builder=builder)
+    reps = build_points(file, points, parallel=build_parallel, problem=problem, home=home, builder=builder)
     live = [p for p in points if p.build_status == "ok" or p.build_status not in drop]
     gpu_note = ""
+    disc_warn: list[str] = []
+    if discover and file.endswith(".py"):
+        disc_warn = discover_points(file, [p for p in live if p.build_status == "ok"], reps, ctx=ctx,
+                                    problem=problem, home=home, builder=builder)
+        live = [p for p in live if p.build_status not in ("needs_build", "build_failed")]
     try:
         if quick_check and live:
             for spec, p in zip(check_specs(file, live, problem=problem, agent=agent), live):
@@ -251,7 +293,10 @@ def run_sweep(file: str, grid: dict[str, list[Any]], *, base: str | None, top: i
     js_p = _runs.write_json(run, "sweep.json", {"schema": "kdev.sweep/1", "file": file, "base": base, "grid": grid,
                                                 "points": [asdict(p) for p in points]})
     res.files.update({"csv": str(csv_p), "sweep": str(js_p)})
-    n_fail = {s: sum(1 for p in points if p.build_status == s) for s in ("build_failed", "spills", "c751x")}
+    n_fail = {s: sum(1 for p in points if p.build_status == s)
+              for s in ("build_failed", "spills", "c751x", "needs_build")}
+    if not n_fail["needs_build"]:
+        del n_fail["needs_build"]
     res.verdict = "built_only" if gpu_note else ("ranked" if ranked else "no_results")
     res.status = "ok" if any(p.build_status == "ok" for p in points) else "fail"
     res.summary = {"n_points": len(points), "built_ok": sum(p.build_status == "ok" for p in points),
@@ -279,6 +324,10 @@ def run_sweep(file: str, grid: dict[str, list[Any]], *, base: str | None, top: i
         lines.append(f"  dropped {p.label} ({knob_str(p.knobs)}): {p.build_status}: {p.reason[:90]}")
     if gpu_note:
         res.warnings.append(f"GPU stage skipped: {gpu_note}")
+    res.warnings += disc_warn
+    n_disc = sum(1 for p in points if p.discover_rounds)
+    if n_disc:
+        res.summary["discovered"] = n_disc
     res.lines = lines
     res.next.append(f"kdev show {run.run_id} --section csv")
     return _runs.finish(run, res)

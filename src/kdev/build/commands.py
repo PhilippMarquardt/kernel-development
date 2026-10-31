@@ -86,40 +86,9 @@ def cmd_build(args: Namespace, ctx: Context) -> Result:
 
 def _discover_loop(path: str, report: Any, rebuild: Any, knobs: dict[str, Any], defines: list[str], ctx: Context,
                    *, max_rounds: int = 6) -> tuple[Any, list[dict[str, Any]], list[str]]:
-    """Build -> GPU discovery job (prepare + one call per shape, hook in discover mode: nothing compiles under
-    the lock) -> rebuild the recorded calls, until a discovery pass finds nothing pending. Returns
-    (final report, rounds, warnings). Skipped (with a warning) when GPU jobs are unavailable."""
-    import os
+    from kdev.build.discover import discover_loop  # noqa: PLC0415
 
-    from kdev.models import FileRef, JobSpec
-    from kdev.util import md5_file, new_id, utc_now
-
-    rounds: list[dict[str, Any]] = []
-    for rnd in range(1, max_rounds + 1):
-        spec = JobSpec(kind="discover", lane="gpu", files=[FileRef(path=os.path.abspath(path), label="A",
-                                                                   md5=md5_file(path), knobs=dict(knobs),
-                                                                   defines=list(defines))],
-                       params={"extra": {"budget_s": 600}}, problem=ctx.problem, job_id=new_id("j"),
-                       agent=ctx.agent or os.environ.get("KDEV_AGENT", ""), timeout_s=900,
-                       run_name=f"discover-{Path(path).stem}", submitted_utc=utc_now(), requires_prebuilt=False)
-        try:
-            r = ctx.submit(spec)
-        except KdevError as e:
-            return report, rounds, [f"discovery skipped ({e.code.value}): prepare-time extensions are built when a "
-                                    "GPU job records them (needs_build -> kdev build again)"]
-        if r.status == "error" or r.error is not None:
-            code = r.error.code if r.error else "error"
-            msg = r.error.message if r.error else ""
-            return report, rounds, [f"discovery round {rnd} failed ({code}): {msg[:160]}"]
-        n = int((r.summary or {}).get("pending", 0))
-        rounds.append({"file": path, "round": rnd, "verdict": r.verdict, "pending": n, "run_id": r.run_id,
-                       "names": (r.summary or {}).get("pending_names", [])[:10]})
-        if n == 0:
-            break
-        report = rebuild(path)              # compiles the recorded calls (CPU only, no lock)
-        if not report.ok:
-            break
-    return report, rounds, []
+    return discover_loop(path, report, rebuild, knobs, defines, ctx, max_rounds=max_rounds)
 
 
 def register(reg: Registry) -> None:

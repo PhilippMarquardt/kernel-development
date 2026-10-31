@@ -261,14 +261,19 @@ def _fake_builder(file, knobs, problem=None, home=None):
 class _Ctx:
     agent, problem, home = "pytest", None, None
 
-    def __init__(self, fail=False):
+    def __init__(self, fail=False, pending=None):
         self.specs = []
         self.fail = fail
+        self.pending = list(pending or [])
 
     def submit(self, spec, **kw):
         if self.fail:
             raise NotImplementedError("Context.submit (P1 + P2)")
         self.specs.append(spec)
+        if spec.kind == "discover":
+            n = self.pending.pop(0) if self.pending else 0
+            return Result(tool="discover", status="ok", verdict="pending" if n else "complete",
+                          run_id=f"d{len(self.specs)}", summary={"pending": n})
         if spec.kind == "check":
             return Result(tool="check", status="ok", verdict="pass", run_id=f"r{len(self.specs)}")
         per = {"base": 2.0}
@@ -291,8 +296,34 @@ def test_run_sweep_ranks_and_drops(tmp_path):
     ab = [sp for sp in ctx.specs if sp.kind == "ab"]
     assert len(ab) == 1 and [x.label for x in ab[0].files][0] == "base" and len(ab[0].files) == 5
     assert all(sp.resolved_lane() == "gpu" for sp in ctx.specs)
+    disc = [sp for sp in ctx.specs if sp.kind == "discover"]       # one per point that built ok (4 + 2 spilling)
+    assert len(disc) == 4 and all(sp.files[0].knobs for sp in disc) and s["discovered"] == 4
     csv = Path(res.files["csv"]).read_text()
     assert csv.splitlines()[0].startswith("label,TILE,STAGES,build_status") and len(csv.splitlines()) == 10
+
+
+def test_run_sweep_discovery_rebuilds_and_drops_pending(tmp_path):
+    f = tmp_path / "sub.py"
+    f.write_text("x = 1\n")
+    calls = []
+
+    def builder(file, knobs, problem=None, home=None):
+        calls.append(dict(knobs))
+        return _fake_builder(file, knobs, problem, home)
+
+    # point 1: pending once then complete (1 rebuild); point 2: pending for all 6 rounds -> dropped
+    ctx = _Ctx(pending=[3, 0] + [1] * 6)
+    res = grid.run_sweep(str(f), {"TILE": [64, 128], "STAGES": [2]}, base=None, top=3, build_parallel=1,
+                         quick_check=False, ctx=ctx, builder=builder)
+    pts = {p["label"]: p for p in __import__("json").loads(Path(res.files["sweep"]).read_text())["points"]}
+    assert pts["p1"]["discover_rounds"] == 2 and pts["p1"]["build_status"] == "ok"
+    assert pts["p2"]["build_status"] == "needs_build" and res.summary["dropped"]["needs_build"] == 1
+    assert len(calls) == 2 + 1 + 6          # initial builds + a rebuild after every pending round
+    ab = [sp for sp in ctx.specs if sp.kind == "ab"]
+    assert [x.label for x in ab[0].files] == ["base", "p1"]
+    nod = grid.run_sweep(str(f), {"TILE": [64], "STAGES": [2]}, base=None, top=1, build_parallel=1, quick_check=False,
+                         ctx=_Ctx(), builder=_fake_builder, discover=False)
+    assert "discovered" not in nod.summary
 
 
 def test_run_sweep_without_gpu_route_and_dry_run(tmp_path):
