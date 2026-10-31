@@ -193,3 +193,22 @@ def test_result_envelope_valid_from_summary():
     import json
 
     json.loads(r.to_json())
+
+
+def test_direct_adapter_check_goes_through_collect(tmp_path):
+    """Attention-style problems pack out + cache entries in reference.collect(); without it
+    check_implementation reports 'malformed output' (the attention calib warning)."""
+    from kdev.timing._direct import DirectOkcAdapter
+
+    pd = tmp_path / "prob"
+    pd.mkdir()
+    (pd / "reference.py").write_text(
+        "def collect(data, out):\n"
+        "    if out != 'raw':\n        raise ValueError('expected raw')\n"
+        "    return ('packed', out)\n"
+        "def check_implementation(data, raw):\n"
+        "    return (raw == ('packed', 'raw'), 'ok' if raw == ('packed', 'raw') else 'malformed output')\n")
+    ad = DirectOkcAdapter(str(pd))
+    assert ad.check({}, "raw").ok
+    bad = ad.check({}, "other")
+    assert not bad.ok and "malformed output: expected raw" in bad.message

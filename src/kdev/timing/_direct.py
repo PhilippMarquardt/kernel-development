@@ -2,7 +2,8 @@
 
 It does exactly what okc/tools/calib.py does: import reference.py from the problem dir, weights =
 generate_weights(WEIGHTS_SEED) (if any), prepare(weights) per file (if any), inputs =
-generate_input(**case, seed) (+ case_fields), kernel_fn(data[, state]), check_implementation. Shapes come
+generate_input(**case, seed) (+ case_fields), kernel_fn(data[, state]), check_implementation (through
+``collect(data, out)`` when reference.py has it, as the judge and the P7 adapter do). Shapes come
 from a judge JSON (records[event=benchmark].case) or ``params.extra.cases``.
 """
 from __future__ import annotations
@@ -166,6 +167,12 @@ class DirectOkcAdapter:
         fn = getattr(R, "check_implementation", None)
         if fn is None:
             return CheckResult(True, "no check_implementation in reference.py")
+        coll = getattr(R, "collect", None)
+        if coll is not None:              # packed outputs (attention: out + new cache entries) as the judge does
+            try:
+                output = coll(inputs, output)
+            except ValueError as e:
+                return CheckResult(False, f"malformed output: {e}")
         n = _n_required_positional(fn)
         res = fn(inputs, output, self.weights()) if (n or 0) >= 3 else fn(inputs, output)
         if isinstance(res, tuple):
