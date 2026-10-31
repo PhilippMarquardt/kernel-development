@@ -27,7 +27,7 @@ from kdev.registry import Context
 from kdev.util import Runner, disk_free_bytes, existing_parent, human_bytes, load_toml, network_path_reason, run
 from kdev.util import which as _which
 
-PROBE_MODULES = ("kdev.service", "kdev.build", "kdev.observe", "kdev.ledger", "kdev.remote")
+PROBE_MODULES = ("kdev.service", "kdev.build", "kdev.observe", "kdev.ledger", "kdev.remote", "kdev.collab")
 STATUS_ORDER = {"FAIL": 0, "WARN": 1, "PASS": 2, "SKIP": 3}
 DISK_WARN_BYTES = 10 << 30
 DISK_FAIL_BYTES = 2 << 30

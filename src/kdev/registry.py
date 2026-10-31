@@ -27,6 +27,7 @@ COMMAND_MODULES = (
     "kdev.service.commands",
     "kdev.ledger.commands",
     "kdev.judge.commands",
+    "kdev.collab.commands",
     "kdev.dashboard.commands",
     "kdev.remote.commands",
     "kdev.mcp.commands",

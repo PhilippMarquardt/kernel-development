@@ -41,7 +41,7 @@ from kdev.mcp.schema import (MAX_WAIT_S, all_args, arg_exposed, arg_schema, comm
 from kdev.registry import Command, Context, Registry, build_registry
 
 COMPACT_TOOLS = ("doctor", "build", "check", "time", "ab", "sass", "timeline", "ledger", "idea", "job",
-                 "show", "run")
+                 "board", "doc", "show", "run")
 
 # compact tool -> (description, {action: command}); action "" = single-command tool.
 COMPACT_GROUPS: dict[str, tuple[str, dict[str, str]]] = {
@@ -60,6 +60,12 @@ COMPACT_GROUPS: dict[str, tuple[str, dict[str, str]]] = {
     "job": ("GPU job queue", {"status": "job status", "wait": "job wait", "list": "job list",
                               "logs": "job logs", "cancel": "job cancel", "queue": "queue status",
                               "offenders": "queue offenders"}),
+    "board": ("agent message board (P9)", {"post": "board post", "read": "board read", "inbox": "board inbox",
+                                            "ack": "board ack", "search": "board search", "thread": "board thread",
+                                            "claims": "board claims", "release": "board release"}),
+    "doc": ("shared docs: notes/lessons/tracker (append-only, P9)",
+            {"append": "doc append", "show": "doc show", "toc": "doc toc", "list": "doc list",
+             "search": "doc search", "checklist": "doc checklist"}),
     "show": ("", {"": "show"}),
 }
 
