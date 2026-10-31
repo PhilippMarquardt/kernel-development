@@ -1,37 +1,65 @@
-# kdev GPU profile (kdev.gpu/1). Seeded in Phase 0 from DESIGN.md 3.3 (okc/research/tlb/SUMMARY.txt,
-# floor/RESULTS.md; H200 pod, CUDA 13.0, read flush, graph replay, median). Owner: P6.
+# kdev GPU profile (kdev.gpu/1). Seeded from DESIGN.md 3.3 (okc/research/tlb/SUMMARY.txt, floor/RESULTS.md;
+# H200 pod, CUDA 13.0, read flush 256 MB, graph replay, median). Owner: P6.
+# Time units: "judge units" = raw graph-replay us minus the judge's 4.0 us fixed cost, unless the key says
+# otherwise (*_rel_us = relative to the 1-kernel `x.add_(1)` graph). Overrides: $KDEV_HOME/gpus/h200.toml.
 schema = "kdev.gpu/1"
 name = "h200"
 marketing = "NVIDIA H200 (SXM, 141 GB HBM3e)"
 smi_names = ["NVIDIA H200"]
 cc = "9.0"
 sm_count = 132
-l2_bytes = 52428800          # 50 MiB (P6: verify on the pod via cudaDevAttrL2CacheSize)
+l2_bytes = 52428800          # 50 MiB (verify on a pod via cudaDevAttrL2CacheSize)
 flush_bytes = 268435456      # 256 MiB read flush (judge-like); 128 MB is 0.2-0.5 us faster, 2 GB 0.2-0.6 us slower
-smem_per_sm = 233472
+smem_per_sm = 233472         # 228 KiB
 regs_per_sm = 65536
 max_warps_per_sm = 64
 max_ctas_per_sm = 32
-globaltimer_ns = [32, 256]
+globaltimer_ns = [32, 256]   # %globaltimer tick: 32 ns in some kernels, 256 ns in others (pod default ~256)
 
-[peak]                       # judge floor constants
+[peak]                       # judge floor constants (datasheet, dense)
 dram_tbps = 4.8
 bf16_tflops = 989
+fp16_tflops = 989
 fp8_tflops = 1979
+int8_tflops = 1979
+tf32_tflops = 494
+fp32_tflops = 67             # non-tensor FFMA
+fp4_tflops = 0
+sm_clock_ghz = 1.98          # max boost; MUFU and per-clock rates use it
+mufu_per_clk_sm = 16         # SFU ops/clk/SM (4 per SMSP): ex2/rsqrt/sin/cos/lg2/rcp
+
+[limits]                     # occupancy rules (kdev regs)
+threads_per_cta_max = 1024
+smem_per_cta_max = 232448    # 227 KiB opt-in dynamic smem
+smem_reserved_per_cta = 1024 # driver-reserved smem per resident CTA
+reg_alloc_granule = 8        # regs/thread rounded up to a multiple of 8 (256 regs per warp)
+regs_per_thread_max = 255
+setmaxnreg_min = 24
+setmaxnreg_max = 256
+setmaxnreg_hang_note = "640 thr (1 producer WG + 4 consumer WGs) at 96 launch regs: producer 24 / consumers 112 is the max; 120 hangs the GPU (sum after setmaxnreg must fit the CTA's launch pool 640*96 = 61440)"
 
 [measured]
 graph_fixed_us = { value = 4.0, unit = "us", source = "judge replay fixed cost" }
-one_kernel_graph_us = { value = 5.2, unit = "us", source = "okc/research/tlb (5.18-5.22 us add_ graph)" }
-null_kernel_rel_us = { value = -0.5, unit = "us", source = "okc/research/tlb: null kernel vs 1-kernel graph" }
-dram_trip_1cta_us = { value = 0.33, unit = "us", source = "okc/research/tlb: 0.31-0.35 us" }
-dram_trip_132cta_us = { value = 0.65, unit = "us", source = "okc/research/tlb: 0.6-0.7 us" }
+one_kernel_graph_us = { value = 5.2, unit = "us", source = "okc/research/tlb (5.18-5.22 us add_ graph, raw)", how = "raw replay us of a 1-kernel x.add_(1) graph" }
+empty_graph_us = { value = 0.74, unit = "us", source = "okc/research/tlb: empty graph 0.74 (512 MB flush) -> 0.93 (2 GB)" }
+null_kernel_rel_us = { value = -0.5, unit = "us", source = "okc/research/tlb + floor/RESULTS.md: -0.48..-0.67 vs 1-kernel graph, any grid/smem/cluster" }
+null_kernel_us = { value = 0.7, unit = "us", source = "okc/research/tlb (n): null kernel after read flush 0.4-0.8 us" }
+dram_trip_1cta_us = { value = 0.33, unit = "us", source = "floor/RESULTS.md: steady 0.31 (16 MB) .. 0.35 (704 MB, TLB misses)" }
+dram_trip_132cta_us = { value = 0.65, unit = "us", source = "okc/research/tlb: 0.6-0.7 us (132 CTAs)" }
 l2_hit_us = { value = 0.15, unit = "us", source = "floor/RESULTS.md" }
-kernel_boundary_us = { value = 2.75, unit = "us", source = "okc/research/tlb: 2.6-2.9 us even with PDL" }
-extra_graph_node_us = { value = 1.7, unit = "us", source = "okc/research/tlb" }
-coop_launch_us = { value = 1.4, unit = "us", source = "okc/research/tlb: +1.3-1.5 us at smem 0/64 KB" }
+gather_round_8k_us = { value = 1.45, unit = "us", source = "floor/RESULTS.md 3: one 8 KB/SM random 128-B row gather round over a null kernel" }
+gather_tbps_132cta = { value = 2.57, unit = "TB/s", source = "floor/RESULTS.md 3: 132 CTAs x 1024 rows (128 KB) random rows" }
+kernel_boundary_us = { value = 2.75, unit = "us", source = "okc/research/tlb: 2.9 plain / 2.6 PDL per boundary (200 MB stream split 8x)" }
+pdl_boundary_us = { value = 2.6, unit = "us", source = "okc/research/tlb (c): PDL wait-at-entry" }
+extra_graph_node_us = { value = 1.7, unit = "us", source = "okc/research/tlb: separate touch node +1.7..3" }
+coop_launch_us = { value = 1.4, unit = "us", source = "okc/research/tlb: +1.3-1.5 us at smem 0/64 KB, ~0 at 200 KB" }
 icache_cold_us = { value = 0.16, unit = "us", source = "okc/research/tlb ic.log: <= 0.16 us" }
 dtlb_cold_us = { value = 0.0, unit = "us", source = "okc/research/tlb: ~0 after read flush" }
-membar_gpu_us = { value = 0.25, unit = "us", source = "floor/RESULTS.md: 0.16-0.33 us" }
-atom_acqrel_cold_us = { value = 0.57, unit = "us", source = "floor/RESULTS.md" }
+membar_gpu_us = { value = 0.25, unit = "us", source = "floor/RESULTS.md: 0.16 alone, 0.23-0.33 after outstanding st/red" }
+fence_cta_us = { value = 0.045, unit = "us", source = "floor/RESULTS.md 4" }
+atom_acqrel_cold_us = { value = 0.57, unit = "us", source = "floor/RESULTS.md: cold counter line" }
+merge_lastcta_us = { value = 1.56, unit = "us", source = "floor/RESULTS.md 4: 33 CTAs x 4 KB red.add.v4 + counter + last-CTA finalize over null" }
+merge_lastcta_256_us = { value = 2.4, unit = "us", source = "floor/RESULTS.md 4: same with 256 CTAs" }
 barrier_cluster_us = { value = 0.38, unit = "us", source = "floor/RESULTS.md: 0.26-0.5 us" }
 stream_tbps = { value = 4.11, unit = "TB/s", source = "okc/research/tlb: 200 MB in 51.1 us" }
+cta_start_spread_264_us = { value = 0.26, unit = "us", source = "floor/RESULTS.md 1: 264 null CTAs start..end spread" }
