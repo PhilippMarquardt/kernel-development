@@ -5,13 +5,26 @@ GPU host. It plays the role for kernel work that REA ("Reverse Engineer Anything
 engineering: one stable contract over many backend tools. The backends here are nvcc/ptxas, cuobjdump/nvdisasm,
 CUDA graphs, CUPTI, `%globaltimer` instrumentation, compute-sanitizer, and ncu/nsys when they are permitted.
 
-**Status: design only.** See [docs/DESIGN.md](docs/DESIGN.md).
+**Status: v0.1, all packages built (P1-P8) and run end-to-end on the OKC H200 pod** (build, check, time,
+calib, sass, ab, serve, mcp). Agents: start with [docs/QUICKSTART.md](docs/QUICKSTART.md) (the 10 commands, in
+order) and [skills/kdev/SKILL.md](skills/kdev/SKILL.md). Design: [docs/DESIGN.md](docs/DESIGN.md); binding plan:
+[docs/PLAN.md](docs/PLAN.md); timing protocol and calibration evidence: [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
+## Install
+
+- On the GPU pod, from a local checkout: `scripts/pod_install.sh [HOST] [PORT]`. The script copies the repo
+  (md5-verified) to `/root/kdev` and runs `uv pip install --no-deps -e` into `/root/vsgl`. It aborts if any
+  existing package would change. It writes `/root/.kdev/kdev.toml` (lock `/root/gpu.lock`, okc_root
+  `/root/okc`) and `/root/.kdev/toolchain.lock` (judge CUDA 13.0 at `/root/cuda130w`). Pod storage is not
+  persistent, so re-run it after every pod restart.
+- Locally (ledger, sass, dashboard, MCP, tests; no GPU needed): `pip install -e ".[dev,mcp]"`, then `pytest`
+  and `ruff check src tests`.
 
 ## Design in brief
 
 - **Interface.** `kdev` is a CLI with a JSON result contract, built over a Python library. It runs on the GPU
   pod and is driven over ssh, either directly or through `kdev remote`. A Claude Code skill describes the
-  workflow. An MCP server will come later as a thin adapter over the same library.
+  workflow. `kdev mcp` is an MCP stdio server generated from the same command registry.
 - **Judge fidelity by default.** Every timing uses:
   - the pinned judge toolchain, recorded from the built `.so`;
   - a read flush of L2;
