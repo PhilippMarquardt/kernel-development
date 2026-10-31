@@ -43,7 +43,15 @@ def test_version_command(capsys):
     assert __version__ in capsys.readouterr().out
 
 
-def test_stub_returns_not_implemented_json(capsys):
+def test_stub_returns_not_implemented_json(monkeypatch, capsys):
+    # Real commands are no longer stubs: swap one handler for a todo() placeholder.
+    import kdev.cli as cli
+    from kdev.registry import todo
+
+    reg = build_registry()
+    cmd, _ = reg.resolve(["ab"])
+    monkeypatch.setattr(cmd, "handler", todo("timing.engine.ab (test)"))
+    monkeypatch.setattr(cli, "build_registry", lambda *a, **k: reg)
     code = main(["ab", "a.py", "b.py", "--json"])
     assert code == EXIT_CODES[ErrorCode.NOT_IMPLEMENTED]
     d = json.loads(capsys.readouterr().out)

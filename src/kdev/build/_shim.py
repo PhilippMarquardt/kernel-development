@@ -1,0 +1,343 @@
+"""Compile-only shim around ``torch.utils.cpp_extension.load_inline``/``load`` (P5, private; stdlib only).
+
+Runs in the problem's pinned interpreter (which may not have kdev installed), therefore self-contained:
+
+    python _shim.py SPEC.json        # SPEC: {file, mode, ext_root, tc_id, knobs, defines, out, force, cap, entries}
+
+mode ``build`` (build lane, CUDA_VISIBLE_DEVICES=''): imports the submission with the hook installed, calls its
+build entry points (``_module``, ``_build*``, ``_ext*``, ...), and builds every intercepted extension into
+``<ext_root>/<key>/`` (key = :func:`ext_key` over toolchain + flags + knobs + sources, never source alone: M3)
+with ``-Xptxas -v -lineinfo``; stdout/stderr of the compile go to ``build.log`` there. Kernel launches never
+happen (the hook returns a stub module in build mode).
+
+mode ``use`` (GPU worker, via :func:`install`): an intercepted call whose key has a complete entry imports the
+cached library directly (no ninja, no nvcc); a missing entry raises :class:`NeedsBuild` unless allow_jit.
+"""
+from __future__ import annotations
+
+import hashlib
+import importlib.util
+import inspect
+import json
+import os
+import re
+import sys
+import time
+import traceback
+
+MARKER = "kdev_ext.json"
+DEFAULT_ENTRIES = ("_module", "_get_module", "_mod", "_load", "_ext", "_get_ext", "_build", "_compile", "build",
+                   "get_module", "load_module")
+_ENTRY_RE = re.compile(r"^_?(build|module|ext|load|compile|get_module|get_ext|jit)\w*$")
+_TRANSIENT = re.compile(r"thrust/[\w/.]+: No such file|fatal error: thrust/|cub/[\w/.]+: No such file|"
+                        r"Text file busy|resource temporarily unavailable", re.I)
+
+
+class NeedsBuild(RuntimeError):
+    """Raised in ``use`` mode when an extension has no complete cache entry (kdev error needs_build)."""
+
+
+class ExtBuildFailed(RuntimeError):
+    """Raised by the hook in ``build`` mode when the compiler fails (kdev error build_failed)."""
+
+
+def ext_key(source_bytes: bytes, tc_version: str, tc_ptxas: str, flags: list[str], knobs: dict) -> str:
+    """sha256(toolchain version + ptxas path + sorted flags + sorted knobs + source)[:16] (PLAN cache.py)."""
+    h = hashlib.sha256()
+    h.update(f"tc={tc_version}|ptxas={tc_ptxas}\n".encode())
+    h.update(("flags=" + "\x1f".join(sorted(str(f) for f in flags)) + "\n").encode())
+    h.update(("knobs=" + json.dumps({str(k): knobs[k] for k in sorted(knobs, key=str)}, sort_keys=True,
+                                     default=str) + "\n").encode())
+    h.update(source_bytes)
+    return h.hexdigest()[:16]
+
+
+def _as_list(x) -> list:
+    if x is None:
+        return []
+    if isinstance(x, (list, tuple)):
+        return list(x)
+    return [x]
+
+
+def _knob_defines(knobs: dict, defines: list[str]) -> list[str]:
+    out = []
+    for k in sorted(knobs, key=str):
+        v = knobs[k]
+        if isinstance(v, bool):
+            v = int(v)
+        out.append(f"-D{k}={v}")
+    out += [d for d in defines if d]
+    return out
+
+
+def call_key(kind: str, kw: dict, tc_version: str, tc_ptxas: str, knobs: dict, defines: list[str]) -> str:
+    """Key of one intercepted load/load_inline call (before kdev adds -v/-lineinfo; knobs/defines included).
+    ``tc_ptxas`` is the toolchain identity (ptxas path + pinned env, see kdev.build.cache.tc_ident); the process
+    environment is deliberately not part of the key so build lane and GPU worker agree."""
+    parts: list[bytes] = [f"kind={kind}|name={kw.get('name')}\n".encode()]
+    if kind == "load_inline":
+        for k in ("cpp_sources", "cuda_sources", "functions"):
+            for s in _as_list(kw.get(k)):
+                parts.append(f"<{k}>".encode() + str(s).encode())
+    else:
+        for p in _as_list(kw.get("sources")):
+            try:
+                with open(p, "rb") as f:
+                    parts.append(f"<src {os.path.basename(str(p))}>".encode() + f.read())
+            except OSError:
+                parts.append(f"<src {p}>".encode())
+    flags = []
+    for k in ("extra_cflags", "extra_cuda_cflags", "extra_ldflags", "extra_include_paths"):
+        flags += [f"{k}:{f}" for f in _as_list(kw.get(k))]
+    flags.append(f"with_cuda:{kw.get('with_cuda')}")
+    flags += [f"define:{d}" for d in defines if d]
+    return ext_key(b"\0".join(parts), tc_version, tc_ptxas, flags, knobs)
+
+
+class _Stub:
+    """Returned instead of the extension module in build mode: any attribute is a no-op callable."""
+
+    def __init__(self, name: str) -> None:
+        self.__name__ = name
+
+    def __getattr__(self, item):
+        if item.startswith("__"):
+            raise AttributeError(item)
+        return lambda *a, **k: None
+
+
+_NAMES = {"load_inline": ("name", "cpp_sources", "cuda_sources", "functions", "extra_cflags",
+                          "extra_cuda_cflags", "extra_ldflags", "extra_include_paths", "build_directory",
+                          "verbose", "with_cuda", "is_python_module", "with_pytorch_error_handling",
+                          "keep_intermediates", "use_pch"),
+          "load": ("name", "sources", "extra_cflags", "extra_cuda_cflags", "extra_ldflags", "extra_include_paths",
+                   "build_directory", "verbose", "with_cuda", "is_python_module", "is_standalone",
+                   "keep_intermediates")}
+
+
+def _bind(kind: str, args: tuple, kw: dict) -> dict:
+    out = dict(zip(_NAMES[kind], args))
+    out.update(kw)
+    return out
+
+
+class Hook:
+    """State of an installed hook (records every intercepted extension)."""
+
+    def __init__(self, *, mode: str, ext_root: str, tc_version: str, tc_ptxas: str, knobs: dict | None = None,
+                 defines: list[str] | None = None, force: bool = False, allow_jit: bool = False,
+                 extra_cuda_flags: list[str] | None = None) -> None:
+        self.mode = mode
+        self.ext_root = ext_root
+        self.tc_version = tc_version
+        self.tc_ptxas = tc_ptxas
+        self.knobs = dict(knobs or {})
+        self.defines = list(defines or [])
+        self.force = force
+        self.allow_jit = allow_jit
+        self.extra_cuda_flags = list(extra_cuda_flags if extra_cuda_flags is not None else
+                                     ["-Xptxas=-v", "-lineinfo"])
+        self.records: list[dict] = []
+        self.real: dict = {}
+
+    # -- the replacement for load_inline / load ------------------------------------------------------------
+    def make(self, kind: str):
+        def hooked(*args, **kwargs):
+            return self._call(kind, args, kwargs)
+        hooked.__name__ = kind
+        hooked.__kdev_hook__ = True  # type: ignore[attr-defined]
+        return hooked
+
+    def _call(self, kind: str, args: tuple, kwargs: dict):
+        kw = _bind(kind, args, kwargs)
+        name = str(kw.get("name"))
+        key = call_key(kind, kw, self.tc_version, self.tc_ptxas, self.knobs, self.defines)
+        d = os.path.join(self.ext_root, key)
+        marker = os.path.join(d, MARKER)
+        rec = {"name": name, "kind": kind, "key": key, "dir": d, "cache_hit": False, "seconds": 0.0,
+               "status": "ok", "log_path": os.path.join(d, "build.log"), "so_path": ""}
+        complete = os.path.isfile(marker) and _so_in(d, name)
+        if self.mode == "use":
+            if not complete:
+                if not self.allow_jit:
+                    rec["status"] = "needs_build"
+                    self.records.append(rec)
+                    raise NeedsBuild(f"extension {name!r} (key {key}) has no prebuilt entry in {self.ext_root}; "
+                                     f"run `kdev build` first")
+                return self._build(kind, kw, rec, d, marker, stub=False)
+            rec["cache_hit"] = True
+            rec["so_path"] = _so_in(d, name)
+            self.records.append(rec)
+            from torch.utils import cpp_extension as ce  # noqa: PLC0415 - worker only
+            return ce._import_module_from_library(name, d, kw.get("is_python_module", True))  # noqa: SLF001
+        if complete and not self.force:
+            rec["cache_hit"] = True
+            rec["so_path"] = _so_in(d, name)
+            self.records.append(rec)
+            return _Stub(name)
+        return self._build(kind, kw, rec, d, marker, stub=True)
+
+    def _build(self, kind: str, kw: dict, rec: dict, d: str, marker: str, *, stub: bool):
+        os.makedirs(d, exist_ok=True)
+        lock = os.path.join(d, "lock")
+        if os.path.exists(lock) and time.time() - os.path.getmtime(lock) > 600:
+            os.remove(lock)   # stale torch FileBaton from a killed build
+        kw = dict(kw)
+        kw["build_directory"] = d
+        kw["verbose"] = True
+        dflags = _knob_defines(self.knobs, self.defines)
+        kw["extra_cuda_cflags"] = _as_list(kw.get("extra_cuda_cflags")) + dflags + self.extra_cuda_flags
+        kw["extra_cflags"] = _as_list(kw.get("extra_cflags")) + dflags
+        real = self.real[kind]
+        log_path = rec["log_path"]
+        t0 = time.monotonic()
+        err = ""
+        result = None
+        for attempt in (1, 2):
+            err = ""
+            with open(log_path, "ab") as logf:
+                logf.write(f"### kdev build attempt {attempt}: {kind} {rec['name']} key={rec['key']}\n".encode())
+                logf.flush()
+                sys.stdout.flush()
+                sys.stderr.flush()
+                saved = os.dup(1), os.dup(2)
+                os.dup2(logf.fileno(), 1)
+                os.dup2(logf.fileno(), 2)
+                try:
+                    result = real(**kw)
+                except Exception as e:  # noqa: BLE001
+                    err = f"{type(e).__name__}: {e}"
+                finally:
+                    sys.stdout.flush()
+                    sys.stderr.flush()
+                    os.dup2(saved[0], 1)
+                    os.dup2(saved[1], 2)
+                    os.close(saved[0])
+                    os.close(saved[1])
+            if not err:
+                break
+            if attempt == 1 and _TRANSIENT.search(err + _tail(log_path, 200)):
+                rec["retried"] = True
+                continue
+            break
+        rec["seconds"] = round(time.monotonic() - t0, 3)
+        if err:
+            rec["status"] = "failed"
+            rec["error"] = err[-4000:]
+            self.records.append(rec)
+            raise ExtBuildFailed(f"extension {rec['name']} failed to build: {err[:400]}")
+        rec["so_path"] = _so_in(d, rec["name"])
+        info = {k: rec[k] for k in ("name", "kind", "key", "seconds", "so_path")}
+        info.update({"tc_version": self.tc_version, "tc_ptxas": self.tc_ptxas, "knobs": self.knobs,
+                     "defines": self.defines, "built_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                     "cuda_flags": kw["extra_cuda_cflags"]})
+        tmp = marker + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(info, f, indent=1)
+        os.replace(tmp, marker)
+        self.records.append(rec)
+        return _Stub(rec["name"]) if stub else result
+
+
+def _tail(path: str, n: int) -> str:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return "".join(f.readlines()[-n:])
+    except OSError:
+        return ""
+
+
+def _so_in(d: str, name: str) -> str:
+    for ext in (".so", ".pyd", ".dll"):
+        p = os.path.join(d, name + ext)
+        if os.path.isfile(p):
+            return p
+    return ""
+
+
+def install(hook: Hook):
+    """Patch torch.utils.cpp_extension.load_inline/load with ``hook`` (imports torch). Returns the hook."""
+    from torch.utils import cpp_extension as ce  # noqa: PLC0415 - runs in the pinned interpreter only
+
+    for kind in ("load_inline", "load"):
+        cur = getattr(ce, kind)
+        if getattr(cur, "__kdev_hook__", False):
+            continue
+        hook.real[kind] = cur
+        setattr(ce, kind, hook.make(kind))
+    return hook
+
+
+def _call_entries(mod, entries: list[str], errors: list[str]) -> list[str]:
+    called = []
+    names = list(entries)
+    for n, obj in vars(mod).items():
+        if callable(obj) and _ENTRY_RE.match(n) and n not in names and getattr(obj, "__module__", None) == mod.__name__:
+            names.append(n)
+    for n in names:
+        fn = getattr(mod, n, None)
+        if not callable(fn) or inspect.isclass(fn):
+            continue
+        try:
+            sig = inspect.signature(fn)
+            if any(p.default is p.empty and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+                   for p in sig.parameters.values()):
+                continue
+        except (TypeError, ValueError):
+            continue
+        called.append(n)
+        try:
+            fn()
+        except ExtBuildFailed as e:
+            errors.append(str(e))
+        except Exception as e:  # noqa: BLE001 - kernel launches etc. fail without CUDA; expected
+            errors.append(f"entry {n}: {type(e).__name__}: {str(e)[:200]}")
+    return called
+
+
+def main(argv: list[str]) -> int:
+    with open(argv[1], encoding="utf-8") as f:
+        spec = json.load(f)
+    out = {"exts": [], "errors": [], "import_error": None, "entries_called": []}
+    hook = Hook(mode=spec.get("mode", "build"), ext_root=spec["ext_root"], tc_version=spec.get("tc_version", ""),
+                tc_ptxas=spec.get("tc_ptxas", ""), knobs=spec.get("knobs") or {}, defines=spec.get("defines") or [],
+                force=bool(spec.get("force")))
+    try:
+        import torch  # noqa: PLC0415
+        cap = tuple(spec.get("cap") or (9, 0))
+        torch.cuda.get_device_capability = lambda *a, **k: cap  # compile only: never touch the driver
+        install(hook)
+    except Exception as e:  # noqa: BLE001
+        out["import_error"] = f"torch unavailable: {type(e).__name__}: {e}"
+        _write(spec["out"], out, hook)
+        return 3
+    path = os.path.abspath(spec["file"])
+    sys.path.insert(0, os.path.dirname(path))
+    os.chdir(os.path.dirname(path))
+    os.environ["KDEV_KNOBS"] = json.dumps(spec.get("knobs") or {})
+    try:
+        s = importlib.util.spec_from_file_location("kdev_build_target", path)
+        mod = importlib.util.module_from_spec(s)
+        sys.modules["kdev_build_target"] = mod
+        s.loader.exec_module(mod)  # type: ignore[union-attr]
+    except ExtBuildFailed as e:
+        out["errors"].append(str(e))
+        mod = None
+    except Exception as e:  # noqa: BLE001
+        out["import_error"] = f"{type(e).__name__}: {e}\n" + traceback.format_exc()[-2000:]
+        mod = None
+    if mod is not None:
+        out["entries_called"] = _call_entries(mod, list(spec.get("entries") or DEFAULT_ENTRIES), out["errors"])
+    _write(spec["out"], out, hook)
+    return 0
+
+
+def _write(path: str, out: dict, hook: Hook) -> None:
+    out["exts"] = hook.records
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(out, f, indent=1)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
