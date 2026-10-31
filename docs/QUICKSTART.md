@@ -32,7 +32,9 @@ timed section; `kdev build`'s discovery and `kdev check` run SHARED (they never 
 
 Supporting commands: `kdev dispatch FILE`, `kdev regs FILE`, `kdev floor --shape S`, `kdev timeline FILE`,
 `kdev comply FILE` (must pass before promoting), `kdev sanitize FILE`, `kdev queue status`,
-`kdev job list|wait|logs`, `kdev runs list`.
+`kdev job list|wait|logs`, `kdev runs list`, `kdev slim STACK.py OUT.py --trace DISPATCH_RUN` (decode + drop dead
+routes, size/md5, <1,000,000 B; then build/check/ab OUT), `kdev ablate FILE --variant mma=a_nomma.py --set
+epilogue:NO_EP=1 --control a_z0.py --floor d32/o=4.66` (us each component costs per shape: excess budget).
 
 ## Example session (attention)
 
