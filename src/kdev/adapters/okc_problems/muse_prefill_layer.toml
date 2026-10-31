@@ -1,0 +1,151 @@
+# muse_prefill_layer: generated from TASK.md 'Shapes' table, the OKC API benchmark list (task seeds), the
+# judge's per-shape run counts and the local harness TESTS/EXTRA lists. Owner: P7. Edit by hand.
+schema = "kdev.okc_problem/1"
+problem = "muse_prefill_layer"
+gpu = "h200"
+kernel_fn_args = 2   # 1: kernel_fn(data); 2: kernel_fn(data, prepare(weights))
+check_style = "collect"   # collect: check_implementation(data, collect(data, out)[, w])
+weights = true   # reference.generate_weights(WEIGHTS_SEED) -> prepare()
+case_fields = true   # reference.case_fields(case, weights) merged per input
+default_seed = 1234
+input_variance = { routing = true, lengths = false }
+search_dirs = ["/root/okc/muse_prefill_layer/muse_prefill_layer", "~/okc/muse_prefill_layer/muse_prefill_layer"]
+sglang_us = 387403.9
+
+[protocol]
+overhead_us = 4.0
+flush = "read"
+judge_reps = 6
+pairing = "order_swapped_pairs"
+score = "load_weighted_geomean"
+budget_s = 900
+prepare_budget_s = 300
+
+[[shapes]]
+id = "t1/sliding"
+load = "turn 1"
+weight = 46
+seed = 1001
+repeats = 6
+floor_us = 257.0
+case = { batch = 1, ctx = 80000, layer = "sliding", q_len = 753, page = 1, dist = "soft" }
+
+[[shapes]]
+id = "t1/full"
+load = "turn 1"
+weight = 16
+seed = 1002
+repeats = 6
+floor_us = 496.7
+case = { batch = 1, ctx = 80000, layer = "full", q_len = 753, page = 1, dist = "soft" }
+
+[[shapes]]
+id = "t4/sliding"
+load = "turn 4"
+weight = 46
+seed = 1003
+repeats = 6
+floor_us = 1036.3
+case = { batch = 4, ctx = 80000, layer = "sliding", q_len = 753, page = 1, dist = "soft" }
+
+[[shapes]]
+id = "t4/full"
+load = "turn 4"
+weight = 16
+seed = 1004
+repeats = 6
+floor_us = 1992.4
+case = { batch = 4, ctx = 80000, layer = "full", q_len = 753, page = 1, dist = "soft" }
+
+[[shapes]]
+id = "ft/full-c0k"
+load = "first turn"
+weight = 16
+seed = 1006
+repeats = 6
+floor_us = 5518.4
+case = { batch = 1, ctx = 0, layer = "full", q_len = 16384, page = 1, dist = "soft" }
+
+[[shapes]]
+id = "ft/sliding-c32k"
+load = "first turn"
+weight = 138
+seed = 1007
+repeats = 6
+floor_us = 5663.4
+case = { batch = 1, ctx = 32768, layer = "sliding", q_len = 16384, page = 1, dist = "soft" }
+
+[[shapes]]
+id = "ft/full-c32k"
+load = "first turn"
+weight = 16
+seed = 1008
+repeats = 6
+floor_us = 7710.0
+case = { batch = 1, ctx = 32768, layer = "full", q_len = 16384, page = 1, dist = "soft" }
+
+[[shapes]]
+id = "ft/full-c64k"
+load = "first turn"
+weight = 16
+seed = 1010
+repeats = 6
+floor_us = 9847.7
+case = { batch = 1, ctx = 65536, layer = "full", q_len = 16384, page = 1, dist = "soft" }
+
+[[tests]]
+id = "t0"
+case = { batch = 1, ctx = 0, layer = "sliding", q_len = 300, page = 1 }
+
+[[tests]]
+id = "t1"
+case = { batch = 1, ctx = 3000, layer = "full", q_len = 753, page = 1 }
+
+[[tests]]
+id = "t2"
+case = { batch = 2, ctx = 2500, layer = "sliding", q_len = 753, page = 1 }
+
+[[tests]]
+id = "t3"
+case = { batch = 3, ctx = 5000, layer = "full", q_len = 200, dist = "outliers" }
+
+[[tests]]
+id = "t4"
+case = { batch = 1, ctx = 4096, layer = "sliding", q_len = 4096, page = 1 }
+
+[[extra]]
+id = "x0"
+case = { batch = 2, ctx = 40000, layer = "sliding", q_len = 600, page = 1, dist = "soft" }
+
+[[extra]]
+id = "x1"
+case = { batch = 1, ctx = 80000, layer = "full", q_len = 1000, page = 1, dist = "soft" }
+
+[[extra]]
+id = "x2"
+case = { batch = 3, ctx = 20000, layer = "full", q_len = 753, page = 1, dist = "soft" }
+
+[[extra]]
+id = "x3"
+case = { batch = 1, ctx = 16384, layer = "sliding", q_len = 8192, page = 1, dist = "soft" }
+
+[[extra]]
+id = "x4"
+case = { batch = 1, ctx = 0, layer = "sliding", q_len = 16384, page = 1, dist = "soft" }
+
+[comply]
+precision = { router = "fp32 at T<=8 (BF16 hi+lo pair with FP32 accumulation allowed above 8 tokens)", kv_cache = "fp8_e4m3", queries = "bf16, or fp8_e4m3 (no coarser)", activations = "bf16 where SGLang keeps bf16", weights = "stored losslessly (NVFP4 stays NVFP4, BF16 stays BF16, router FP32)" }
+forbid_patterns = ['\.item\(\)', '\.cpu\(\)', '\.tolist\(\)', '\.numpy\(\)', 'torch\.cuda\.synchronize', '\.synchronize\(\)', 'print\([^)]*(data|out|tensor)']
+no_cross_call_state = true
+graph_capturable = true
+lossless_weights = true
+notes = ["Prefill: own board; inputs/outputs/bounds/routing check as muse_decode_layer.", "Every key attended (no sparse / block-skipping attention)."]
+
+[comply.every_key]
+enabled = true
+
+[comply.routing]   # router precision probe (LESSONS 5): fp32 router at T <= fp32_max_tokens
+ids_output = 2
+fp32_max_tokens = 8
+gap_tol = 0.0001
+probe_shapes = ["t1/sliding", "t1/full"]

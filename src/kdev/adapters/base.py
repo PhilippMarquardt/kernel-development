@@ -97,5 +97,23 @@ class Adapter(Protocol):
 
 def load_weighted_geomean(shapes: list[Shape], sub_us: dict[str, float], base_us: dict[str, float]) -> float:
     """OKC score: per load, sum(weight * us) for base and sub; geomean over loads of base/sub. Pure.
-    Implemented by P7 (used by P3 for score CIs)."""
-    raise NotImplementedError("adapters.base.load_weighted_geomean (P7)")
+    Implemented by P7 (used by P3 for score CIs).
+
+    Only scored shapes present (and > 0) in both dicts count; a load with no such shape is skipped (partial runs,
+    ``--shapes`` filters). Returns NaN when no load is left."""
+    import math
+
+    loads: dict[str, list[float]] = {}
+    for s in shapes:
+        if not s.scored or s.shape_id not in sub_us or s.shape_id not in base_us:
+            continue
+        sub, base = float(sub_us[s.shape_id]), float(base_us[s.shape_id])
+        if not (sub > 0 and base > 0):
+            continue
+        acc = loads.setdefault(s.load or s.shape_id, [0.0, 0.0])
+        acc[0] += s.weight * base
+        acc[1] += s.weight * sub
+    ratios = [b / a for b, a in loads.values() if a > 0]
+    if not ratios:
+        return float("nan")
+    return math.exp(sum(math.log(r) for r in ratios) / len(ratios))

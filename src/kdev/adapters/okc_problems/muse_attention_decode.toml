@@ -1,0 +1,229 @@
+# muse_attention_decode: generated from TASK.md 'Shapes' table, the OKC API benchmark list (task seeds), the
+# judge's per-shape run counts and the local harness TESTS/EXTRA lists. Owner: P7. Edit by hand.
+schema = "kdev.okc_problem/1"
+problem = "muse_attention_decode"
+gpu = "h200"
+kernel_fn_args = 1   # 1: kernel_fn(data); 2: kernel_fn(data, prepare(weights))
+check_style = "collect"   # collect: check_implementation(data, collect(data, out)[, w])
+weights = false   # reference.generate_weights(WEIGHTS_SEED) -> prepare()
+case_fields = false   # reference.case_fields(case, weights) merged per input
+default_seed = 1234
+input_variance = { routing = false, lengths = true }
+search_dirs = ["/root/okc/muse_attention_decode/muse_attention_decode", "~/okc/muse_attention_decode/muse_attention_decode"]
+sglang_us = 3766.3
+
+[protocol]
+overhead_us = 4.0
+flush = "read"
+judge_reps = 60
+pairing = "order_swapped_pairs"
+score = "load_weighted_geomean"
+budget_s = 900
+prepare_budget_s = 300
+
+[[shapes]]
+id = "d1/sliding"
+load = "decode 1"
+weight = 46
+seed = 601
+repeats = 60
+floor_us = 0.1
+case = { batch = 1, ctx = 80000, heads = "tp8", layer = "sliding", page = 1, dist = "soft" }
+
+[[shapes]]
+id = "d1/full"
+load = "decode 1"
+weight = 16
+seed = 602
+repeats = 60
+floor_us = 4.3
+case = { batch = 1, ctx = 80000, heads = "tp8", layer = "full", page = 1, dist = "coherent" }
+
+[[shapes]]
+id = "d16/sliding"
+load = "decode 16"
+weight = 46
+seed = 603
+repeats = 60
+floor_us = 1.6
+case = { batch = 16, ctx = 80000, heads = "tp8", layer = "sliding", page = 1, spread = "agentic", dist = "soft" }
+
+[[shapes]]
+id = "d16/full"
+load = "decode 16"
+weight = 16
+seed = 604
+repeats = 60
+floor_us = 63.2
+case = { batch = 16, ctx = 80000, heads = "tp8", layer = "full", page = 1, spread = "agentic", dist = "coherent" }
+
+[[shapes]]
+id = "d32/sliding"
+load = "decode 32"
+weight = 46
+seed = 605
+repeats = 60
+floor_us = 3.3
+case = { batch = 32, ctx = 80000, heads = "tp8", layer = "sliding", page = 1, spread = "agentic", dist = "soft" }
+
+[[shapes]]
+id = "d32/full"
+load = "decode 32"
+weight = 16
+seed = 606
+repeats = 60
+floor_us = 126.4
+case = { batch = 32, ctx = 80000, heads = "tp8", layer = "full", page = 1, spread = "agentic", dist = "coherent" }
+
+[[shapes]]
+id = "v1/sliding"
+load = "verify 1"
+weight = 46
+seed = 607
+repeats = 60
+floor_us = 0.1
+case = { batch = 1, ctx = 80000, heads = "tp8", layer = "sliding", page = 1, q_len = 8, dist = "soft" }
+
+[[shapes]]
+id = "v1/full"
+load = "verify 1"
+weight = 16
+seed = 608
+repeats = 60
+floor_us = 4.3
+case = { batch = 1, ctx = 80000, heads = "tp8", layer = "full", page = 1, q_len = 8, dist = "coherent" }
+
+[[shapes]]
+id = "v16/sliding"
+load = "verify 16"
+weight = 46
+seed = 609
+repeats = 60
+floor_us = 1.9
+case = { batch = 16, ctx = 80000, heads = "tp8", layer = "sliding", page = 1, q_len = 8, spread = "agentic", dist = "soft" }
+
+[[shapes]]
+id = "v16/full"
+load = "verify 16"
+weight = 16
+seed = 610
+repeats = 60
+floor_us = 63.4
+case = { batch = 16, ctx = 80000, heads = "tp8", layer = "full", page = 1, q_len = 8, spread = "agentic", dist = "coherent" }
+
+[[shapes]]
+id = "v32/sliding"
+load = "verify 32"
+weight = 46
+seed = 611
+repeats = 60
+floor_us = 3.7
+case = { batch = 32, ctx = 80000, heads = "tp8", layer = "sliding", page = 1, q_len = 8, spread = "agentic", dist = "soft" }
+
+[[shapes]]
+id = "v32/full"
+load = "verify 32"
+weight = 16
+seed = 612
+repeats = 60
+floor_us = 126.8
+case = { batch = 32, ctx = 80000, heads = "tp8", layer = "full", page = 1, q_len = 8, spread = "agentic", dist = "coherent" }
+
+[[tests]]
+id = "t0"
+case = { batch = 1, ctx = 10, heads = "tp8", layer = "sliding" }
+
+[[tests]]
+id = "t1"
+case = { batch = 3, ctx = 2047, heads = "tp8", layer = "sliding" }
+
+[[tests]]
+id = "t2"
+case = { batch = 5, ctx = 5000, heads = "tp8", layer = "sliding", q_len = 8, spread = "mixed", page = 1 }
+
+[[tests]]
+id = "t3"
+case = { batch = 4, ctx = 3000, heads = "tp8", layer = "full" }
+
+[[tests]]
+id = "t4"
+case = { batch = 8, ctx = 8192, heads = "dp", layer = "full", spread = "mixed" }
+
+[[tests]]
+id = "t5"
+case = { batch = 2, ctx = 100000, heads = "tp8", layer = "full", q_len = 8, page = 1 }
+
+[[tests]]
+id = "t6"
+case = { batch = 4, ctx = 6000, heads = "tp8", layer = "sliding", dist = "edges", page = 1 }
+
+[[tests]]
+id = "t7"
+case = { batch = 4, ctx = 6000, heads = "tp8", layer = "full", q_len = 8, dist = "edges" }
+
+[[tests]]
+id = "t8"
+case = { batch = 1, ctx = 1048576, heads = "tp8", layer = "full", q_len = 8 }
+
+[[tests]]
+id = "t9"
+case = { batch = 3, ctx = 4000, heads = "tp8", layer = "sliding", q_len = 8, page = 1, kv_scale = 0.015625 }
+
+[[tests]]
+id = "t10"
+case = { batch = 2, ctx = 9000, heads = "tp8", layer = "full", kv_scale = 0.015625 }
+
+[[tests]]
+id = "t11"
+case = { batch = 4, ctx = 80000, heads = "tp8", layer = "full", spread = "mixed", dist = "soft" }
+
+[[tests]]
+id = "t12"
+case = { batch = 4, ctx = 6000, heads = "tp8", layer = "sliding", q_len = 8, dist = "soft", page = 1 }
+
+[[tests]]
+id = "t13"
+case = { batch = 2, ctx = 20000, heads = "dp", layer = "full", q_len = 8, dist = "soft" }
+
+[[tests]]
+id = "t14"
+case = { batch = 4, ctx = 80000, heads = "tp8", layer = "full", spread = "mixed", dist = "coherent", page = 1 }
+
+[[tests]]
+id = "t15"
+case = { batch = 2, ctx = 20000, heads = "dp", layer = "full", q_len = 8, dist = "coherent" }
+
+[[extra]]
+id = "x0"
+case = { batch = 8, ctx = 80000, heads = "tp8", layer = "full", q_len = 8, page = 1, spread = "agentic", dist = "coherent" }
+
+[[extra]]
+id = "x1"
+case = { batch = 24, ctx = 60000, heads = "tp8", layer = "full", q_len = 8, page = 1, spread = "agentic", dist = "coherent" }
+
+[[extra]]
+id = "x2"
+case = { batch = 3, ctx = 70000, heads = "tp8", layer = "full", q_len = 8, page = 1, spread = "mixed", dist = "soft" }
+
+[[extra]]
+id = "x3"
+case = { batch = 8, ctx = 80000, heads = "tp8", layer = "sliding", page = 1, spread = "agentic", dist = "soft" }
+
+[[extra]]
+id = "x4"
+case = { batch = 24, ctx = 60000, heads = "tp8", layer = "full", page = 1, spread = "agentic", dist = "coherent" }
+
+[[extra]]
+id = "x5"
+case = { batch = 48, ctx = 30000, heads = "tp8", layer = "sliding", q_len = 8, page = 1, spread = "agentic", dist = "soft" }
+
+[comply]
+precision = { kv_cache = "fp8_e4m3", queries = "bf16, or fp8_e4m3 (no coarser)", activations = "bf16 where SGLang keeps bf16" }
+forbid_patterns = ['\.item\(\)', '\.cpu\(\)', '\.tolist\(\)', '\.numpy\(\)', 'torch\.cuda\.synchronize', '\.synchronize\(\)', 'print\([^)]*(data|out|tensor)']
+no_cross_call_state = true
+graph_capturable = true
+lossless_weights = false
+notes = ["Every key: attend the whole 2,048-token window (sliding) / whole context (full); no top-k, sparse or block-skipping attention, no skipping values by attention weight.", "kernel_fn writes the new FP8 cache entries into data['k_cache']/['v_cache'] (checked via collect).", "Fresh inputs every call: nothing derived from data may be cached."]
+
+[comply.every_key]
+enabled = true

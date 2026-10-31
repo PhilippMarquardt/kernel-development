@@ -1,0 +1,379 @@
+# muse_bf16_proj: generated from TASK.md 'Shapes' table, the OKC API benchmark list (task seeds), the
+# judge's per-shape run counts and the local harness TESTS/EXTRA lists. Owner: P7. Edit by hand.
+schema = "kdev.okc_problem/1"
+problem = "muse_bf16_proj"
+gpu = "h200"
+kernel_fn_args = 2   # 1: kernel_fn(data); 2: kernel_fn(data, prepare(weights))
+check_style = "direct"   # collect: check_implementation(data, collect(data, out)[, w])
+weights = true   # reference.generate_weights(WEIGHTS_SEED) -> prepare()
+case_fields = false   # reference.case_fields(case, weights) merged per input
+default_seed = 1234
+input_variance = { routing = false, lengths = false }
+search_dirs = ["/root/okc/muse_bf16_proj/muse_bf16_proj", "~/okc/muse_bf16_proj/muse_bf16_proj"]
+sglang_us = 4830.8
+
+[protocol]
+overhead_us = 4.0
+flush = "read"
+judge_reps = 60
+pairing = "order_swapped_pairs"
+score = "load_weighted_geomean"
+budget_s = 900
+prepare_budget_s = 300
+
+[[shapes]]
+id = "d1/qkv_gate"
+load = "decode 1"
+weight = 62
+seed = 201
+repeats = 60
+floor_us = 7.9
+case = { m = 1, layer = "qkv_gate" }
+
+[[shapes]]
+id = "d1/o"
+load = "decode 1"
+weight = 62
+seed = 202
+repeats = 60
+floor_us = 3.5
+case = { m = 1, layer = "o" }
+
+[[shapes]]
+id = "d1/pooler"
+load = "decode 1"
+weight = 62
+seed = 203
+repeats = 60
+floor_us = 14.0
+case = { m = 1, layer = "pooler" }
+
+[[shapes]]
+id = "d1/unpooler"
+load = "decode 1"
+weight = 62
+seed = 204
+repeats = 60
+floor_us = 1.7
+case = { m = 1, layer = "unpooler" }
+
+[[shapes]]
+id = "d1/router"
+load = "decode 1"
+weight = 62
+seed = 205
+repeats = 60
+floor_us = 1.8
+case = { m = 1, layer = "router" }
+
+[[shapes]]
+id = "d16/qkv_gate"
+load = "decode 16"
+weight = 62
+seed = 206
+repeats = 60
+floor_us = 7.9
+case = { m = 16, layer = "qkv_gate" }
+
+[[shapes]]
+id = "d16/o"
+load = "decode 16"
+weight = 62
+seed = 207
+repeats = 60
+floor_us = 3.6
+case = { m = 16, layer = "o" }
+
+[[shapes]]
+id = "d16/pooler"
+load = "decode 16"
+weight = 62
+seed = 208
+repeats = 60
+floor_us = 14.1
+case = { m = 16, layer = "pooler" }
+
+[[shapes]]
+id = "d16/unpooler"
+load = "decode 16"
+weight = 62
+seed = 209
+repeats = 60
+floor_us = 14.1
+case = { m = 16, layer = "unpooler" }
+
+[[shapes]]
+id = "d16/router"
+load = "decode 16"
+weight = 62
+seed = 210
+repeats = 60
+floor_us = 1.8
+case = { m = 16, layer = "router" }
+
+[[shapes]]
+id = "d32/qkv_gate"
+load = "decode 32"
+weight = 62
+seed = 211
+repeats = 60
+floor_us = 8.0
+case = { m = 32, layer = "qkv_gate" }
+
+[[shapes]]
+id = "d32/o"
+load = "decode 32"
+weight = 62
+seed = 212
+repeats = 60
+floor_us = 3.6
+case = { m = 32, layer = "o" }
+
+[[shapes]]
+id = "d32/pooler"
+load = "decode 32"
+weight = 62
+seed = 213
+repeats = 60
+floor_us = 14.1
+case = { m = 32, layer = "pooler" }
+
+[[shapes]]
+id = "d32/unpooler"
+load = "decode 32"
+weight = 62
+seed = 214
+repeats = 60
+floor_us = 14.1
+case = { m = 32, layer = "unpooler" }
+
+[[shapes]]
+id = "d32/router"
+load = "decode 32"
+weight = 62
+seed = 215
+repeats = 60
+floor_us = 1.9
+case = { m = 32, layer = "router" }
+
+[[shapes]]
+id = "v1/qkv_gate"
+load = "verify 1"
+weight = 62
+seed = 216
+repeats = 60
+floor_us = 7.9
+case = { m = 8, layer = "qkv_gate" }
+
+[[shapes]]
+id = "v1/o"
+load = "verify 1"
+weight = 62
+seed = 217
+repeats = 60
+floor_us = 3.5
+case = { m = 8, layer = "o" }
+
+[[shapes]]
+id = "v1/pooler"
+load = "verify 1"
+weight = 62
+seed = 218
+repeats = 60
+floor_us = 14.0
+case = { m = 8, layer = "pooler" }
+
+[[shapes]]
+id = "v1/unpooler"
+load = "verify 1"
+weight = 62
+seed = 219
+repeats = 60
+floor_us = 1.8
+case = { m = 8, layer = "unpooler" }
+
+[[shapes]]
+id = "v1/router"
+load = "verify 1"
+weight = 62
+seed = 220
+repeats = 60
+floor_us = 1.8
+case = { m = 8, layer = "router" }
+
+[[shapes]]
+id = "v16/qkv_gate"
+load = "verify 16"
+weight = 62
+seed = 221
+repeats = 60
+floor_us = 8.4
+case = { m = 128, layer = "qkv_gate" }
+
+[[shapes]]
+id = "v16/o"
+load = "verify 16"
+weight = 62
+seed = 222
+repeats = 60
+floor_us = 4.0
+case = { m = 128, layer = "o" }
+
+[[shapes]]
+id = "v16/pooler"
+load = "verify 16"
+weight = 62
+seed = 223
+repeats = 60
+floor_us = 14.6
+case = { m = 128, layer = "pooler" }
+
+[[shapes]]
+id = "v16/unpooler"
+load = "verify 16"
+weight = 62
+seed = 224
+repeats = 60
+floor_us = 14.6
+case = { m = 128, layer = "unpooler" }
+
+[[shapes]]
+id = "v16/router"
+load = "verify 16"
+weight = 62
+seed = 225
+repeats = 60
+floor_us = 2.2
+case = { m = 128, layer = "router" }
+
+[[shapes]]
+id = "v32/qkv_gate"
+load = "verify 32"
+weight = 62
+seed = 226
+repeats = 60
+floor_us = 9.8
+case = { m = 256, layer = "qkv_gate" }
+
+[[shapes]]
+id = "v32/o"
+load = "verify 32"
+weight = 62
+seed = 227
+repeats = 60
+floor_us = 4.5
+case = { m = 256, layer = "o" }
+
+[[shapes]]
+id = "v32/pooler"
+load = "verify 32"
+weight = 62
+seed = 228
+repeats = 60
+floor_us = 17.4
+case = { m = 256, layer = "pooler" }
+
+[[shapes]]
+id = "v32/unpooler"
+load = "verify 32"
+weight = 62
+seed = 229
+repeats = 60
+floor_us = 17.4
+case = { m = 256, layer = "unpooler" }
+
+[[shapes]]
+id = "v32/router"
+load = "verify 32"
+weight = 62
+seed = 230
+repeats = 60
+floor_us = 2.7
+case = { m = 256, layer = "router" }
+
+[[tests]]
+id = "t0"
+case = { m = 1, layer = "qkv_gate" }
+
+[[tests]]
+id = "t1"
+case = { m = 7, layer = "pooler" }
+
+[[tests]]
+id = "t2"
+case = { m = 33, layer = "o" }
+
+[[tests]]
+id = "t3"
+case = { m = 130, layer = "unpooler" }
+
+[[tests]]
+id = "t4"
+case = { m = 5, layer = "unpooler" }
+
+[[tests]]
+id = "t5"
+case = { m = 8, layer = "router" }
+
+[[tests]]
+id = "t6"
+case = { m = 9, layer = "router", dist = "outliers" }
+
+[[tests]]
+id = "t7"
+case = { m = 512, layer = "qkv_gate", dist = "outliers" }
+
+[[tests]]
+id = "t8"
+case = { m = 1000, layer = "unpooler", dist = "outliers" }
+
+[[extra]]
+id = "x0"
+case = { m = 2, layer = "qkv_gate" }
+
+[[extra]]
+id = "x1"
+case = { m = 3, layer = "o" }
+
+[[extra]]
+id = "x2"
+case = { m = 9, layer = "unpooler" }
+
+[[extra]]
+id = "x3"
+case = { m = 12, layer = "pooler" }
+
+[[extra]]
+id = "x4"
+case = { m = 24, layer = "router" }
+
+[[extra]]
+id = "x5"
+case = { m = 64, layer = "qkv_gate" }
+
+[[extra]]
+id = "x6"
+case = { m = 200, layer = "o" }
+
+[[extra]]
+id = "x7"
+case = { m = 300, layer = "router" }
+
+[[extra]]
+id = "x8"
+case = { m = 17, layer = "unpooler" }
+
+[[extra]]
+id = "x9"
+case = { m = 4, layer = "router" }
+
+[comply]
+precision = { router = "fp32 weights and output (BF16 hi+lo pair with FP32 accumulation allowed)", weights = "bf16 stored losslessly", activations = "bf16" }
+forbid_patterns = ['\.item\(\)', '\.cpu\(\)', '\.tolist\(\)', '\.numpy\(\)', 'torch\.cuda\.synchronize', '\.synchronize\(\)', 'print\([^)]*(data|out|tensor)']
+no_cross_call_state = true
+graph_capturable = true
+lossless_weights = true
+notes = ["Probe rows (one nonzero power-of-two input) must be exact to 0.1%: weights at their own precision.", "unpooler at m<=8 computes only the first 1024 output columns."]
+
+[comply.every_key]
+enabled = false

@@ -1,0 +1,231 @@
+# muse_decode_layer: generated from TASK.md 'Shapes' table, the OKC API benchmark list (task seeds), the
+# judge's per-shape run counts and the local harness TESTS/EXTRA lists. Owner: P7. Edit by hand.
+schema = "kdev.okc_problem/1"
+problem = "muse_decode_layer"
+gpu = "h200"
+kernel_fn_args = 2   # 1: kernel_fn(data); 2: kernel_fn(data, prepare(weights))
+check_style = "collect"   # collect: check_implementation(data, collect(data, out)[, w])
+weights = true   # reference.generate_weights(WEIGHTS_SEED) -> prepare()
+case_fields = true   # reference.case_fields(case, weights) merged per input
+default_seed = 1234
+input_variance = { routing = true, lengths = true }
+search_dirs = ["/root/okc/muse_decode_layer/muse_decode_layer", "~/okc/muse_decode_layer/muse_decode_layer"]
+sglang_us = 22620.3
+
+[protocol]
+overhead_us = 4.0
+flush = "read"
+judge_reps = 20
+pairing = "order_swapped_pairs"
+score = "load_weighted_geomean"
+budget_s = 900
+prepare_budget_s = 300
+
+[[shapes]]
+id = "d1/sliding"
+load = "decode 1"
+weight = 46
+seed = 801
+repeats = 60
+floor_us = 40.0
+case = { batch = 1, ctx = 80000, layer = "sliding", page = 1, dist = "soft" }
+
+[[shapes]]
+id = "d1/full"
+load = "decode 1"
+weight = 16
+seed = 802
+repeats = 60
+floor_us = 44.2
+case = { batch = 1, ctx = 80000, layer = "full", page = 1, dist = "soft" }
+
+[[shapes]]
+id = "d16/sliding"
+load = "decode 16"
+weight = 46
+seed = 803
+repeats = 20
+floor_us = 76.7
+case = { batch = 16, ctx = 80000, layer = "sliding", page = 1, spread = "agentic", dist = "soft" }
+
+[[shapes]]
+id = "d16/full"
+load = "decode 16"
+weight = 16
+seed = 804
+repeats = 20
+floor_us = 137.5
+case = { batch = 16, ctx = 80000, layer = "full", page = 1, spread = "agentic", dist = "soft" }
+
+[[shapes]]
+id = "d32/sliding"
+load = "decode 32"
+weight = 46
+seed = 805
+repeats = 20
+floor_us = 84.5
+case = { batch = 32, ctx = 80000, layer = "sliding", page = 1, spread = "agentic", dist = "soft" }
+
+[[shapes]]
+id = "d32/full"
+load = "decode 32"
+weight = 16
+seed = 806
+repeats = 20
+floor_us = 208.1
+case = { batch = 32, ctx = 80000, layer = "full", page = 1, spread = "agentic", dist = "soft" }
+
+[[shapes]]
+id = "v1/sliding"
+load = "verify 1"
+weight = 46
+seed = 807
+repeats = 20
+floor_us = 62.3
+case = { batch = 1, ctx = 80000, layer = "sliding", page = 1, q_len = 8, dist = "soft" }
+
+[[shapes]]
+id = "v1/full"
+load = "verify 1"
+weight = 16
+seed = 808
+repeats = 20
+floor_us = 66.4
+case = { batch = 1, ctx = 80000, layer = "full", page = 1, q_len = 8, dist = "soft" }
+
+[[shapes]]
+id = "v16/sliding"
+load = "verify 16"
+weight = 46
+seed = 809
+repeats = 20
+floor_us = 126.6
+case = { batch = 16, ctx = 80000, layer = "sliding", page = 1, q_len = 8, spread = "agentic", dist = "soft" }
+
+[[shapes]]
+id = "v16/full"
+load = "verify 16"
+weight = 16
+seed = 810
+repeats = 20
+floor_us = 188.7
+case = { batch = 16, ctx = 80000, layer = "full", page = 1, q_len = 8, spread = "agentic", dist = "soft" }
+
+[[shapes]]
+id = "v32/sliding"
+load = "verify 32"
+weight = 46
+seed = 811
+repeats = 20
+floor_us = 143.8
+case = { batch = 32, ctx = 80000, layer = "sliding", page = 1, q_len = 8, spread = "agentic", dist = "soft" }
+
+[[shapes]]
+id = "v32/full"
+load = "verify 32"
+weight = 16
+seed = 812
+repeats = 20
+floor_us = 267.2
+case = { batch = 32, ctx = 80000, layer = "full", page = 1, q_len = 8, spread = "agentic", dist = "soft" }
+
+[[tests]]
+id = "t0"
+case = { batch = 1, ctx = 10, layer = "sliding" }
+
+[[tests]]
+id = "t1"
+case = { batch = 1, ctx = 3000, layer = "full" }
+
+[[tests]]
+id = "t2"
+case = { batch = 8, ctx = 2047, layer = "sliding" }
+
+[[tests]]
+id = "t3"
+case = { batch = 9, ctx = 5000, layer = "sliding", spread = "mixed", page = 1 }
+
+[[tests]]
+id = "t4"
+case = { batch = 3, ctx = 6000, layer = "full", q_len = 8, dist = "outliers" }
+
+[[tests]]
+id = "t5"
+case = { batch = 5, ctx = 5000, layer = "sliding", q_len = 8, spread = "mixed", page = 1 }
+
+[[tests]]
+id = "t6"
+case = { batch = 33, ctx = 20000, layer = "full", spread = "mixed", page = 1 }
+
+[[tests]]
+id = "t7"
+case = { batch = 2, ctx = 300000, layer = "sliding", q_len = 8 }
+
+[[tests]]
+id = "t8"
+case = { batch = 1, ctx = 1048576, layer = "full", q_len = 8 }
+
+[[tests]]
+id = "t9"
+case = { batch = 4, ctx = 7000, layer = "sliding", q_len = 8, page = 1, kv_scale = 0.015625 }
+
+[[tests]]
+id = "t10"
+case = { batch = 1, ctx = 80000, layer = "full", dist = "soft", page = 1 }
+
+[[tests]]
+id = "t11"
+case = { batch = 4, ctx = 6000, layer = "sliding", q_len = 8, dist = "soft" }
+
+[[tests]]
+id = "t12"
+case = { batch = 16, ctx = 20000, layer = "full", spread = "mixed", dist = "soft", page = 1 }
+
+[[extra]]
+id = "x0"
+case = { batch = 2, ctx = 9000, layer = "sliding", page = 1, dist = "soft", q_len = 1, spread = "agentic" }
+
+[[extra]]
+id = "x1"
+case = { batch = 17, ctx = 30000, layer = "full", page = 1, dist = "soft", q_len = 1, spread = "agentic" }
+
+[[extra]]
+id = "x2"
+case = { batch = 31, ctx = 20000, layer = "sliding", page = 1, dist = "soft", q_len = 8, spread = "agentic" }
+
+[[extra]]
+id = "x3"
+case = { batch = 48, ctx = 8000, layer = "full", page = 1, dist = "soft", q_len = 8, spread = "agentic" }
+
+[[extra]]
+id = "x4"
+case = { batch = 64, ctx = 6000, layer = "sliding", page = 1, dist = "soft", q_len = 8, spread = "agentic" }
+
+[[extra]]
+id = "x5"
+case = { batch = 40, ctx = 30000, layer = "full", page = 1, dist = "soft", q_len = 1, spread = "agentic" }
+
+[[extra]]
+id = "x6"
+case = { batch = 24, ctx = 10000, layer = "full", page = 1, dist = "soft", q_len = 8, spread = "agentic" }
+
+[[extra]]
+id = "x7"
+case = { batch = 3, ctx = 40000, layer = "sliding", page = 1, dist = "soft", q_len = 8, spread = "agentic" }
+
+[comply]
+precision = { router = "fp32 at T<=8 (BF16 hi+lo pair with FP32 accumulation allowed above 8 tokens)", kv_cache = "fp8_e4m3", queries = "bf16, or fp8_e4m3 (no coarser)", activations = "bf16 where SGLang keeps bf16", weights = "stored losslessly (NVFP4 stays NVFP4, BF16 stays BF16, router FP32)" }
+forbid_patterns = ['\.item\(\)', '\.cpu\(\)', '\.tolist\(\)', '\.numpy\(\)', 'torch\.cuda\.synchronize', '\.synchronize\(\)', 'print\([^)]*(data|out|tensor)']
+no_cross_call_state = true
+graph_capturable = true
+lossless_weights = true
+notes = ["LESSONS 5: a vjeux-derived best fed bf16 activations to the router at T<=8 (reference fp32).", "Every key attended (no sparse / block-skipping attention).", "Communication is the identity (no all-reduce work)."]
+
+[comply.every_key]
+enabled = true
+
+[comply.routing]   # router precision probe (LESSONS 5): fp32 router at T <= fp32_max_tokens
+ids_output = 2
+fp32_max_tokens = 8
+gap_tol = 0.0001
+probe_shapes = ["d1/sliding", "d1/full", "v1/sliding", "v1/full", "d16/full"]

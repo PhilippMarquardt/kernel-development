@@ -1,0 +1,139 @@
+# muse_moe_w4a16: generated from TASK.md 'Shapes' table, the OKC API benchmark list (task seeds), the
+# judge's per-shape run counts and the local harness TESTS/EXTRA lists. Owner: P7. Edit by hand.
+schema = "kdev.okc_problem/1"
+problem = "muse_moe_w4a16"
+gpu = "h200"
+kernel_fn_args = 2   # 1: kernel_fn(data); 2: kernel_fn(data, prepare(weights))
+check_style = "direct"   # collect: check_implementation(data, collect(data, out)[, w])
+weights = true   # reference.generate_weights(WEIGHTS_SEED) -> prepare()
+case_fields = false   # reference.case_fields(case, weights) merged per input
+default_seed = 1234
+input_variance = { routing = true, lengths = false }
+search_dirs = ["/root/okc/muse_moe_w4a16/muse_moe_w4a16", "~/okc/muse_moe_w4a16/muse_moe_w4a16"]
+sglang_us = 13448.5
+
+[protocol]
+overhead_us = 4.0
+flush = "read"
+judge_reps = 100
+pairing = "order_swapped_pairs"
+score = "load_weighted_geomean"
+budget_s = 900
+prepare_budget_s = 300
+
+[[shapes]]
+id = "d1/bs1"
+load = "decode 1"
+weight = 60
+seed = 401
+repeats = 100
+floor_us = 11.4
+case = { bs = 1, sharding = "ep8" }
+
+[[shapes]]
+id = "d16/bs16"
+load = "decode 16"
+weight = 60
+seed = 402
+repeats = 100
+floor_us = 52.5
+case = { bs = 16, sharding = "ep8" }
+
+[[shapes]]
+id = "d32/bs32"
+load = "decode 32"
+weight = 60
+seed = 403
+repeats = 100
+floor_us = 70.8
+case = { bs = 32, sharding = "ep8" }
+
+[[shapes]]
+id = "v1/bs8"
+load = "verify 1"
+weight = 60
+seed = 404
+repeats = 100
+floor_us = 37.3
+case = { bs = 8, sharding = "ep8" }
+
+[[shapes]]
+id = "v16/bs128"
+load = "verify 16"
+weight = 60
+seed = 405
+repeats = 100
+floor_us = 101.3
+case = { bs = 128, sharding = "ep8" }
+
+[[shapes]]
+id = "v32/bs256"
+load = "verify 32"
+weight = 60
+seed = 406
+repeats = 100
+floor_us = 108.9
+case = { bs = 256, sharding = "ep8" }
+
+[[tests]]
+id = "t0"
+case = { bs = 4, sharding = "ep8" }
+
+[[tests]]
+id = "t1"
+case = { bs = 33, sharding = "ep8" }
+
+[[tests]]
+id = "t2"
+case = { bs = 257, sharding = "ep8" }
+
+[[tests]]
+id = "t3"
+case = { bs = 128, sharding = "ep8", dist = "skewed" }
+
+[[tests]]
+id = "t4"
+case = { bs = 1, sharding = "ep8" }
+
+[[extra]]
+id = "x0"
+case = { bs = 2, sharding = "ep8" }
+
+[[extra]]
+id = "x1"
+case = { bs = 12, sharding = "ep8" }
+
+[[extra]]
+id = "x2"
+case = { bs = 24, sharding = "ep8" }
+
+[[extra]]
+id = "x3"
+case = { bs = 48, sharding = "ep8" }
+
+[[extra]]
+id = "x4"
+case = { bs = 64, sharding = "ep8" }
+
+[[extra]]
+id = "x5"
+case = { bs = 200, sharding = "ep8" }
+
+[[extra]]
+id = "x6"
+case = { bs = 32, sharding = "ep8", dist = "skewed" }
+
+[[extra]]
+id = "x7"
+case = { bs = 8, sharding = "ep8", dist = "skewed" }
+
+[comply]
+precision = { activations = "bf16 where SGLang keeps bf16", weights = "NVFP4 stored losslessly", output = "bf16" }
+forbid_patterns = ['\.item\(\)', '\.cpu\(\)', '\.tolist\(\)', '\.numpy\(\)', 'torch\.cuda\.synchronize', '\.synchronize\(\)', 'print\([^)]*(data|out|tensor)']
+no_cross_call_state = true
+graph_capturable = true
+lossless_weights = true
+notes = ["Only routes to local experts (0-31, ep8) are computed; rank='busiest' routing.", "Weights: repack in prepare(), lossless compression allowed, never a different precision."]
+
+[comply.every_key]
+enabled = false

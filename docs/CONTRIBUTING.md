@@ -41,6 +41,22 @@ ruff check src tests
   Any deviation is an opt-out recorded in `Fidelity.optouts` and printed in CAPS.
 - Files: LF line endings, UTF-8, line length 120. No GPU work, compiles or network in import side effects.
 
+## P1 helpers for handlers
+
+- `ctx.cfg` is the loaded `kdev.config.Config` (`--home` honoured); `ctx.problem_name` = `--problem` or
+  `default_problem`. Config errors surface as `invalid_request` Results before your handler runs.
+- GPU commands: build a `JobSpec` and `return ctx.submit_from_args(spec, args)` (applies --detach/--direct/
+  --timeout/--priority/--run-name; fills job_id/agent/problem; `KDEV_NO_GPU=1` -> `capability_unavailable`).
+- Run dirs: `rd = kdev.runs.new_run(ctx.cfg, tool, slug)`; `rd.write_json`, `rd.append_jsonl`, `rd.log`,
+  `rd.write_result(result)` (also writes `summary.txt`, the rendered summary that `kdev show RUN` prints).
+  Put large artifacts in the run dir and name them in `result.files` so `kdev show RUN --section KEY` pages them.
+- Rendering: put your body in `Result.lines` (use `kdev.output.table`, `fmt_us`, `fmt_ratio`, `fmt_ci`,
+  `fidelity_line`); `render()` adds verdict line, fidelity, warnings, run line and next hints within 40 lines.
+- Doctor: implement `probe(ctx, problem) -> list[Check]` in your package `__init__`; until then P1 runs a
+  minimal fallback for service/build/remote (`kdev.doctor.FALLBACKS`).
+- util: `run` (127 on missing exe, 124 on timeout), `md5_file`, `norm_md5`, `atomic_write_text/json`,
+  `load_toml`, `which(name, extra_dirs)`, `slugify`, `network_path_reason`, `disk_free_bytes`, `human_bytes`.
+
 ## Definition of done (per package)
 
 Functions implemented; unit tests pass without a GPU; `kdev <cmd> --help` accurate; `--json` passes
