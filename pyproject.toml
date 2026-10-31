@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.2"]
+mcp = ["mcp>=1.2,<2"]
 stats = ["numpy>=1.24"]
 dev = ["pytest>=7.4", "ruff>=0.5"]
 
