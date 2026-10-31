@@ -58,8 +58,12 @@ freeze() { uv pip freeze --python "$PY" 2>/dev/null | grep -v -i -E '^(-e |kdev[
 freeze > /tmp/kdev_freeze_before.txt
 TORCH_BEFORE=$("$PY" -c 'import torch; print(torch.__version__)' 2>/dev/null || echo none)
 
-rm -rf "$DEST" && mkdir -p "$DEST"
-tar --no-same-owner -xzf /tmp/kdev_src.tgz -C "$DEST"
+# extract next to $DEST, then swap by rename: running kdev jobs spawn worker processes that import from $DEST,
+# and a rm -rf + extract leaves a window in which they find no package
+rm -rf "$DEST.new" "$DEST.old" && mkdir -p "$DEST.new"
+tar --no-same-owner -xzf /tmp/kdev_src.tgz -C "$DEST.new"
+if [ -d "$DEST" ]; then mv "$DEST" "$DEST.old"; fi
+mv "$DEST.new" "$DEST" && rm -rf "$DEST.old"
 uv pip install -q --python "$PY" --no-deps -e "$DEST"
 
 if [ "$WITH_MCP" = 1 ]; then
