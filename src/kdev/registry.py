@@ -19,6 +19,7 @@ COMMAND_MODULES = (
     "kdev.checks.commands",
     "kdev.timing.commands",
     "kdev.sweep.commands",
+    "kdev.ablate.commands",
     "kdev.sass.commands",
     "kdev.occupancy.commands",
     "kdev.timeline.commands",
