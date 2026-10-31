@@ -102,3 +102,33 @@ def test_base_name_anonymous_namespace():
     rt = "void (anonymous namespace)::attn_kernel<1, false, 13>((anonymous namespace)::Params)"
     st = "_ZN39_GLOBAL__N__f3bab234_7_cuda_cu_0b177e6611attn_kernelILi8ELb1ELi0EEEvNS_6ParamsE"
     assert base_name(rt) == base_name(st) == "attn_kernel"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX flock queueing")
+def test_lock_waiter_queues_and_abandons(tmp_path):
+    import fcntl
+    import os
+    import time
+
+    from kdev.service.lock import _FileLock
+
+    p = str(tmp_path / "gpu.lock")
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    lk = _FileLock(p)
+    t0 = time.time()
+
+    def stop():
+        if time.time() - t0 > 0.5:
+            raise TimeoutError
+
+    with pytest.raises(TimeoutError):
+        lk.acquire_waiting(stop, 0.05)
+    lk.release()
+    fcntl.flock(fd, fcntl.LOCK_UN)
+    time.sleep(0.2)                       # the abandoned waiter took and dropped the lock
+    lk2 = _FileLock(p)
+    lk2.acquire_waiting(lambda: None, 0.05)
+    assert lk2.held
+    lk2.release()
+    os.close(fd)

@@ -121,6 +121,63 @@ class _FileLock:
         self.held = True
         return True
 
+    def acquire_waiting(self, stop: Callable[[], None], poll_s: float = 0.2) -> None:
+        """Block until the lock is ours. ``stop()`` is called every ``poll_s`` and may raise (timeout/cancel).
+
+        POSIX: a blocking flock in a helper thread, so we queue in the kernel like gpu_run.sh's ``flock 9``.
+        Polling with LOCK_NB starves behind blocked waiters: on release the kernel hands the lock to one of
+        them, and a poller only wins in the rare gap with no queued waiter (seen on the pod: 10+ min waits
+        while gpu_run.sh jobs kept getting the lock). The thread flocks a dup of our fd (same open file
+        description = same lock); if we stop waiting, the thread releases the lock as soon as it gets it."""
+        if sys.platform == "win32":
+            while not self.try_acquire():
+                stop()
+                time.sleep(poll_s)
+            return
+        import fcntl
+        import threading
+
+        if self.try_acquire():
+            return
+        fd2 = os.dup(self.fd)
+        mtx = threading.Lock()
+        state = {"s": "waiting", "err": None}
+        done = threading.Event()
+
+        def waiter() -> None:
+            try:
+                fcntl.flock(fd2, fcntl.LOCK_EX)
+            except OSError as e:
+                state["err"] = e
+            with mtx:
+                if state["s"] == "abandoned" and state["err"] is None:
+                    try:
+                        fcntl.flock(fd2, fcntl.LOCK_UN)
+                    except OSError:
+                        pass
+                elif state["err"] is None:
+                    state["s"] = "acquired"
+            try:
+                os.close(fd2)
+            except OSError:
+                pass
+            done.set()
+
+        threading.Thread(target=waiter, name="kdev-flock", daemon=True).start()
+        while not done.wait(poll_s):
+            try:
+                stop()
+            except BaseException:
+                with mtx:
+                    if state["s"] == "waiting":
+                        state["s"] = "abandoned"
+                        raise
+                break                       # acquired in the same instant: keep it
+        done.wait()
+        if state["err"] is not None:
+            raise state["err"]
+        self.held = True
+
     def release(self) -> None:
         try:
             if self.held:
@@ -232,7 +289,7 @@ def _exclusive_gen(cfg: Config, *, timeout_s: float | None = None, job_id: str |
     t0 = time.monotonic()
     lk = _FileLock(cfg.lock_path)
     try:
-        while not lk.try_acquire():
+        def _stop() -> None:
             if timeout_s is not None and time.monotonic() - t0 > timeout_s:
                 h = holder(cfg)
                 raise KdevError(ErrorCode.GPU_BUSY_TIMEOUT,
@@ -241,7 +298,8 @@ def _exclusive_gen(cfg: Config, *, timeout_s: float | None = None, job_id: str |
                                 details={"holder": h}, recovery="retry later or check `kdev queue status`")
             if abort is not None and abort():
                 raise KdevError(ErrorCode.CANCELLED, "cancelled while waiting for the GPU lock")
-            time.sleep(min(0.2, poll_s))
+
+        lk.acquire_waiting(_stop, min(0.2, poll_s))
         t_lock = time.monotonic()
         seen: dict[int, ComputeApp] = {}       # logged offenders
         everseen: dict[int, ComputeApp] = {}   # every foreign app that delayed us
