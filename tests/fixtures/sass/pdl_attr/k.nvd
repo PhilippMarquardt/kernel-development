@@ -1,0 +1,18 @@
+	.target	sm_90a
+.text.attn:
+	//## File "k.cu", line 8
+        /*0000*/                   LDC R1, c[0x0][0x28] ;
+        /*0010*/                   S2R R0, SR_TID.X ;
+        /*0020*/                   ULDC.64 UR48, c[0x0][0x208] ;
+	//## File "k.cu", line 9
+        /*0030*/                   LDC.64 R10, c[0x0][0x218] ;
+        /*0040*/                   IMAD.WIDE R10, R0, 0x4, R10 ;
+	//## File "/usr/local/cuda/include/sm_32_intrinsics.hpp", line 112
+        /*0050*/                   LDG.E.CONSTANT R12, desc[UR48][R10.64] ;
+	//## File "k.cu", line 10
+        /*0060*/                   LDC.64 R4, c[0x0][0x220] ;
+        /*0070*/                   IMAD.WIDE R4, R12, 0x4, R4 ;
+        /*0080*/                   LDG.E R6, desc[UR48][R4.64] ;
+	//## File "k.cu", line 11
+        /*0090*/                   ACQBULK ;
+        /*00a0*/                   EXIT ;

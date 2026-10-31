@@ -24,8 +24,8 @@ def _hist_str(h: dict[str, float], n: int = 9, per: bool = False) -> str:
     return " ".join(f"{k}={v:.2f}" if per else f"{k}={int(v)}" for k, v in items)
 
 
-def analyse(kernels: list[Any], *, audits: str, top: int, per: float | None, infos: dict, ptxas_text: str
-            ) -> dict[str, Any]:
+def analyse(kernels: list[Any], *, audits: str, top: int, per: float | None, infos: dict, ptxas_text: str,
+            pdl_ctx: Any = None) -> dict[str, Any]:
     """Library entry: per-kernel facts, hot loops, findings (JSON-ready)."""
     from kdev.sass.audits import parse_audit_names, run_audits  # noqa: PLC0415
     from kdev.sass.classes import histogram, opcode_counts  # noqa: PLC0415
@@ -36,7 +36,7 @@ def analyse(kernels: list[Any], *, audits: str, top: int, per: float | None, inf
     for k in kernels:
         info = infos.get(k.name)
         loops = hot_loops(k, top=max(top, 1), per=per)
-        finds = run_audits(k, names, info=info, ptxas_text=ptxas_text, expected=expected)
+        finds = run_audits(k, names, info=info, ptxas_text=ptxas_text, expected=expected, pdl_ctx=pdl_ctx)
         body = [i for i in k.instrs if i.base != "NOP"]
         out.append({"kernel": k.name, "short": _short(k.name), "arch": k.arch, "instrs": len(body),
                     "regs": k.regs, "spill_store": info.spill_store if info else None,
@@ -83,7 +83,11 @@ def _report_lines(data: dict[str, Any], *, top: int, show_loops: bool, per: floa
             lines.append(f"  ... {len(finds) - shown} more findings in sass.json")
             break
         lines.append(f"  {f['severity'].upper():5s} {f['audit']}: {name[:24]}: {f['message'][:150]}")
-        if f["severity"] == "error" and f["excerpt"]:
+        if f["audit"] == "pdl" and f.get("details") and f["severity"] != "info":
+            for d in f["details"][:3]:
+                lines.append(f"        {d['root'][:40]} x{d['count']}  {d['line'] or ''}"
+                             + (f"  `{d['source'][:50]}`" if d.get("source") else ""))
+        elif f["severity"] == "error" and f["excerpt"]:
             lines.append(f"        {f['excerpt'][0][:110]}")
         shown += 1
     if not finds:
@@ -104,7 +108,15 @@ def cmd_sass(args: Namespace, ctx: Context) -> Result:
         res.lines = [f"no kernels matched {args.kernel!r}; available: "
                      + ", ".join(_short(k.name) for k in t.kernels[:10])]
         return res
-    data = analyse(kernels, audits=args.audit, top=args.top, per=args.per, infos=t.infos, ptxas_text=t.ptxas_text)
+    pdl_ctx = None
+    if "pdl" in (args.audit or "pdl") or (args.audit or "") == "all":
+        from kdev.sass._pdlsrc import build_context  # noqa: PLC0415
+
+        pdl_ctx = build_context(args.target if args.target.endswith((".py", ".cu", ".cuh")) else None, kernels,
+                                list(getattr(args, "source", None) or []))
+        res.warnings += pdl_ctx.warnings
+    data = analyse(kernels, audits=args.audit, top=args.top, per=args.per, infos=t.infos, ptxas_text=t.ptxas_text,
+                   pdl_ctx=pdl_ctx)
     run = _runs.new_run(ctx, "sass", Path(args.target).stem)
     sp = _runs.write_text(run, "sass.txt", t.sass_text)
     jp = _runs.write_json(run, "sass.json", {"schema": "kdev.sass/1", "target": args.target, "kind": t.kind, **data})
@@ -185,7 +197,10 @@ def register(reg: Registry) -> None:
                       Arg(("--per",), "elements per loop iteration (per-element histogram)", type="float",
                           default=None),
                       Arg(("--audit",), "comma list: pdl,spills,serialize,repeat,invariant,expect=HGMMA|LDS, all",
-                          default="pdl,spills,serialize,repeat,invariant")],
+                          default="pdl,spills,serialize,repeat,invariant"),
+                      Arg(("--source",), "extra CUDA source for pdl naming/allowlist (repeatable; line-info "
+                          "sources and the target are read automatically)", type="path", action="append",
+                          default=None)],
                 effects=FX, package=P)
     reg.command("sass diff", "build-vs-build SASS diff", cmd_sass_diff,
                 args=[Arg(("a",), "build A (.py/.cu built, .so, .cubin, .sass)", type="path"),

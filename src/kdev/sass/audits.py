@@ -2,7 +2,9 @@
 
 - pdl: in kernels containing ACQBULK (griddepcontrol.wait), any global load (LDG*, LD.E*, ULDG, UTMALDG,
   LDGSTS) reachable on a path from entry before the first ACQBULK (M9; LESSONS 11). Severity error; loads on a
-  path that never reaches ACQBULK are a warn.
+  path that never reaches ACQBULK are a warn. Each load is attributed to the kernel parameter (struct member)
+  its address comes from (``_pdlsrc``); loads whose roots are all on the file's ``kdev:pdl-allow NAME -- why``
+  list are info.
 - spills: LDL/STL anywhere (warn) and inside loops (error), plus ptxas spill bytes.
 - serialize: ptxas C7510-C7515 warnings for the kernel (error: wgmma serialised).
 - expect: classes/opcodes that should be present (e.g. HGMMA) but are absent -> DCE suspicion (M15).
@@ -42,6 +44,7 @@ class Finding:
     message: str
     addrs: list[int] = field(default_factory=list)
     excerpt: list[str] = field(default_factory=list)   # <= 8 SASS lines
+    details: list[dict] = field(default_factory=list)   # audit-specific (pdl: per-root groups)
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -50,14 +53,21 @@ class Finding:
 
     def key(self) -> str:
         """Address-free identity (for build-vs-build diffs)."""
-        return f"{self.audit}:{self.severity}:" + re.sub(r"0x[0-9a-f]+|\d+", "#", self.message)
+        msg = self.message
+        if self.audit == "pdl":           # the attribution part (root names, lines) is not identity
+            msg = re.split(r" read |: ", msg)[0]
+        return f"{self.audit}:{self.severity}:" + re.sub(r"0x[0-9a-f]+|\d+", "#", msg)
 
 
 def _ex(instrs: list[Instr], n: int = 8) -> list[str]:
     return [f"/*{i.addr:04x}*/ {i.text}" + (f"   // {i.line}" if i.line else "") for i in instrs[:n]]
 
 
-def audit_pdl(kernel: Kernel) -> list[Finding]:
+def audit_pdl(kernel: Kernel, ctx: object | None = None) -> list[Finding]:
+    """Pre-wait global loads, attributed to the kernel parameter they read (``_pdlsrc``). Loads whose every
+    root is on the file's ``kdev:pdl-allow`` list are reported as info with the justification."""
+    from kdev.sass import _pdlsrc  # noqa: PLC0415
+
     acq = {i.addr for i in kernel.instrs if i.base == "ACQBULK"}
     if not acq:
         return []
@@ -70,15 +80,30 @@ def audit_pdl(kernel: Kernel) -> list[Finding]:
     out: list[Finding] = []
     first = min(acq)
     if hoisted:
-        out.append(Finding("pdl", "error", kernel.name,
-                           f"{len(hoisted)} global load(s) before griddepcontrol.wait (ACQBULK @0x{first:04x}): "
-                           f"producer data read before the wait races the previous kernel (LESSONS 11); read it "
-                           f"after the wait (asm volatile ld.global)",
-                           [i.addr for i in hoisted], _ex(hoisted)))
+        roots = _pdlsrc.attribute(kernel, hoisted, ctx)  # type: ignore[arg-type]
+        bad = [i for i, r in zip(hoisted, roots) if not r.allowed]
+        ok = [r for r in roots if r.allowed]
+        if bad:
+            rb = [r for r in roots if not r.allowed]
+            what, det = _pdlsrc.summarize(rb, ctx)  # type: ignore[arg-type]
+            out.append(Finding("pdl", "error", kernel.name,
+                               f"{len(bad)} global load(s) before griddepcontrol.wait (ACQBULK @0x{first:04x}) read "
+                               f"{what}: producer data read before the wait races the previous kernel (LESSONS 11); "
+                               f"move it after the wait, or allowlist a read-only input with "
+                               f"`// kdev:pdl-allow NAME -- why`",
+                               [i.addr for i in bad], _ex(bad), det))
+        if ok:
+            what, det = _pdlsrc.summarize(ok, ctx)  # type: ignore[arg-type]
+            reasons = "; ".join(dict.fromkeys(r.allowed or "" for r in ok))
+            out.append(Finding("pdl", "info", kernel.name,
+                               f"{len(ok)} pre-wait load(s) allowlisted: {what} ({reasons[:120]})",
+                               [r.addr for r in ok], [], det))
     if never:
+        roots = _pdlsrc.attribute(kernel, never, ctx)  # type: ignore[arg-type]
+        what, det = _pdlsrc.summarize(roots, ctx)  # type: ignore[arg-type]
         out.append(Finding("pdl", "warn", kernel.name,
-                           f"{len(never)} global load(s) on paths that exit without griddepcontrol.wait",
-                           [i.addr for i in never], _ex(never)))
+                           f"{len(never)} global load(s) on paths that exit without griddepcontrol.wait: {what}",
+                           [i.addr for i in never], _ex(never), det))
     return out
 
 
@@ -262,13 +287,13 @@ def parse_audit_names(spec: str | list[str] | None) -> tuple[list[str], list[str
 
 
 def run_audits(kernel: Kernel, names: list[str], *, info: KernelInfo | None = None, ptxas_text: str = "",
-               expected: list[str] | None = None) -> list[Finding]:
+               expected: list[str] | None = None, pdl_ctx: object | None = None) -> list[Finding]:
     names, exp2 = parse_audit_names(list(names))
     expected = list(expected or []) + exp2
     out: list[Finding] = []
     for n in names:
         if n == "pdl":
-            out += audit_pdl(kernel)
+            out += audit_pdl(kernel, pdl_ctx)
         elif n == "spills":
             out += audit_spills(kernel, info)
         elif n == "serialize":
