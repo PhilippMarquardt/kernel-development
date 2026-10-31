@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -217,3 +218,44 @@ def test_hook_discover_mode_records_and_stubs(monkeypatch, tmp_path):
     m = h._call("load_inline", ("prep_ext", "cpp"), {"cuda_sources": "k"})
     assert m.anything(1, 2) is None and h.records[-1]["status"] == "pending"
     assert len(list((tmp_path / "c" / "pending").glob("*.json"))) == 1
+
+
+def test_pending_records_of_edited_file_are_dropped(monkeypatch, tmp_path):
+    """Board #78: a pending call recorded by a GPU run for an older content of the file (compile error fixed,
+    new ext hash) must not be rebuilt (build_failed for old names) nor count as pending (ab: needs_build)."""
+    from kdev.build import _shim, cache
+    from kdev.models import Toolchain
+
+    monkeypatch.setattr(_shim, "_ACTIVE", [])
+    monkeypatch.delenv("KDEV_LEGACY_EXT", raising=False)
+    _fake_torch(monkeypatch)
+    tc = Toolchain(nvcc_version="13.0", ptxas="p")
+    home = str(tmp_path / "home")
+    root = cache.ext_root(home, tc)
+    sub = tmp_path / "a_noep.py"
+    sub.write_text("SRC = 'broken'\n", encoding="utf-8")
+    use = _shim.Hook(mode="use", ext_root=root, tc_version=cache.tc_version(tc), tc_ptxas=cache.tc_ident(tc))
+    use.owner = str(sub)
+    use.discover = True
+    use._call("load_inline", ("proj_sk2o_old", "cpp"), {"cuda_sources": "broken"})
+    assert cache.pending_for(str(sub), tc, home) == ["proj_sk2o_old"]
+
+    sub.write_text("SRC = 'fixed'\n", encoding="utf-8")          # source changed: old record superseded
+    use.records.clear()
+    use._call("load_inline", ("proj_sk2o_new", "cpp"), {"cuda_sources": "fixed"})
+    assert cache.pending_for(str(sub), tc, home) == ["proj_sk2o_new"]
+    assert len(list((Path(root) / "pending").glob("*.json"))) == 1        # stale record deleted
+
+    built = []
+    b = _shim.Hook(mode="build", ext_root=root, tc_version=cache.tc_version(tc), tc_ptxas=cache.tc_ident(tc))
+    monkeypatch.setattr(b, "_build", lambda kind, kw, rec, d, marker, stub: built.append(kw["name"]))
+    assert len(b.build_pending(str(sub))) == 1 and built == ["proj_sk2o_new"]
+
+    # legacy record (no file_md5) older than the file: stale too; --clean-pending drops current ones as well
+    pdir = Path(root) / "pending"
+    (pdir / "old.json").write_text(json.dumps({"kind": "load_inline", "kw": {"name": "legacy"}, "key": "old",
+                                               "tc_version": cache.tc_version(tc), "tc_ptxas": cache.tc_ident(tc),
+                                               "file": str(sub), "ts": 1.0}), encoding="utf-8")
+    use._call("load_inline", ("cur", "cpp"), {"cuda_sources": "cur"})
+    assert cache.pending_for(str(sub), tc, home) == ["cur"] and not (pdir / "old.json").exists()
+    assert len(cache.clean_pending(str(sub), tc, home)) == 1 and cache.pending_for(str(sub), tc, home) == []

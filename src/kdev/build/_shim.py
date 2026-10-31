@@ -52,6 +52,67 @@ def ext_key(source_bytes: bytes, tc_version: str, tc_ptxas: str, flags: list[str
     return h.hexdigest()[:16]
 
 
+def file_md5(path: str) -> str:
+    """md5 of a file's bytes, '' if unreadable (pending records key their owner file's content on it)."""
+    try:
+        with open(path, "rb") as f:
+            return hashlib.md5(f.read()).hexdigest()  # noqa: S324 - identity hash
+    except OSError:
+        return ""
+
+
+def pending_state(doc: dict, path: str, tc_version: str, tc_ptxas: str) -> str:
+    """How a pending record relates to submission ``path`` under this toolchain: 'match' (to build),
+    'other' (another toolchain or owner file), or 'stale' (owned by ``path`` but recorded for different file
+    content: the source changed since the GPU run, so the call is superseded and must be dropped, board #78).
+    Records without ``file_md5`` (older kdev) are stale when the file was modified after they were written."""
+    if doc.get("tc_version") != tc_version or doc.get("tc_ptxas") != tc_ptxas:
+        return "other"
+    owner = doc.get("file") or ""
+    if not owner:
+        return "match"
+    if os.path.abspath(owner) != os.path.abspath(path):
+        return "other"
+    want = doc.get("file_md5")
+    if want:
+        cur = file_md5(path)
+        return "stale" if cur and cur != want else "match"
+    try:
+        return "stale" if os.path.getmtime(path) > float(doc.get("ts") or 0) else "match"
+    except OSError:
+        return "match"
+
+
+def scan_pending(ext_root: str, path: str, tc_version: str, tc_ptxas: str, *, prune: bool = True,
+                 clean: bool = False) -> tuple[list[tuple[str, dict]], list[str]]:
+    """([(record path, doc)] matching ``path``, [removed record paths]). ``prune`` deletes stale records of
+    ``path``; ``clean`` deletes every record owned by ``path`` (``kdev build --clean-pending``)."""
+    d = os.path.join(ext_root, "pending")
+    keep: list[tuple[str, dict]] = []
+    removed: list[str] = []
+    if not os.path.isdir(d):
+        return keep, removed
+    for fn in sorted(x for x in os.listdir(d) if x.endswith(".json")):
+        p = os.path.join(d, fn)
+        try:
+            with open(p, encoding="utf-8") as f:
+                doc = json.load(f)
+        except (OSError, ValueError):
+            continue
+        st = pending_state(doc, path, tc_version, tc_ptxas)
+        owned = bool(doc.get("file")) and st != "other"
+        if (clean and owned) or (prune and st == "stale"):
+            try:
+                os.remove(p)
+                removed.append(p)
+            except OSError:
+                pass
+            continue
+        if st == "match":
+            keep.append((p, doc))
+    return keep, removed
+
+
 def _jsonable(v) -> bool:
     if v is None or isinstance(v, (str, int, float, bool)):
         return True
@@ -214,7 +275,7 @@ class Hook:
             safe = {k: v for k, v in kw.items() if _jsonable(v)}
             doc = {"kind": kind, "kw": safe, "key": key, "knobs": self.knobs, "defines": self.defines,
                    "tc_version": self.tc_version, "tc_ptxas": self.tc_ptxas, "file": self.owner,
-                   "ts": time.time()}
+                   "file_md5": file_md5(self.owner) if self.owner else "", "ts": time.time()}
             with open(os.path.join(d, key + ".json"), "w", encoding="utf-8") as f:
                 json.dump(doc, f)
         except Exception:  # noqa: BLE001 - best effort; the NeedsBuild error still names the extension
@@ -223,25 +284,13 @@ class Hook:
     def build_pending(self, file: str, shard: int = 0, shards: int = 1) -> list[str]:
         """Build mode: compile the pending calls recorded for ``file`` (or with no owner) for this toolchain
         (every ``shards``-th one starting at ``shard``: parallel shim processes split the list).
-        Returns the keys built; a built call's pending file is removed."""
-        d = os.path.join(self.ext_root, "pending")
+        Returns the keys built; a built call's pending file is removed, records of an older content of
+        ``file`` are dropped unbuilt (stale)."""
         done: list[str] = []
-        if not os.path.isdir(d):
-            return done
+        recs, _ = scan_pending(self.ext_root, file, self.tc_version, self.tc_ptxas, prune=shard == 0)
         knobs, defines = self.knobs, self.defines
-        for j, fn in enumerate(sorted(x for x in os.listdir(d) if x.endswith(".json"))):
+        for j, (p, doc) in enumerate(recs):
             if j % max(1, shards) != shard:
-                continue
-            p = os.path.join(d, fn)
-            try:
-                with open(p, encoding="utf-8") as f:
-                    doc = json.load(f)
-            except (OSError, ValueError):
-                continue
-            if doc.get("tc_version") != self.tc_version or doc.get("tc_ptxas") != self.tc_ptxas:
-                continue
-            owner = doc.get("file") or ""
-            if owner and os.path.abspath(owner) != os.path.abspath(file):
                 continue
             self.knobs, self.defines = dict(doc.get("knobs") or {}), list(doc.get("defines") or [])
             try:

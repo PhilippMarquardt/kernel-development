@@ -49,6 +49,14 @@ def cmd_build(args: Namespace, ctx: Context) -> Result:
         return build_file(f, knobs=knobs, defines=defines, problem=ctx.problem, force=args.force,
                           verbose=args.verbose, home=home)
 
+    cleaned: dict[str, int] = {}
+    if getattr(args, "clean_pending", False):
+        from kdev.build import cache  # noqa: PLC0415
+        from kdev.build.toolchain import pin_for  # noqa: PLC0415
+
+        for f in files:
+            if f.endswith(".py") and Path(f).is_file():
+                cleaned[f] = len(cache.clean_pending(f, pin_for(ctx.problem, f), home))
     with ThreadPoolExecutor(max_workers=max(1, min(args.jobs, len(files)))) as ex:
         reports = list(ex.map(one, files))
     rounds: list[dict[str, Any]] = []
@@ -63,6 +71,9 @@ def cmd_build(args: Namespace, ctx: Context) -> Result:
             rounds += rr
             disc_warn += w
     res = build_result(reports, verbose=args.verbose)
+    if cleaned:
+        res.summary["pending_cleaned"] = cleaned
+        res.lines += [f"clean-pending {Path(f).name}: removed {n} pending record(s)" for f, n in cleaned.items()]
     if rounds:
         res.summary["discover_rounds"] = rounds
         last = {}
@@ -103,6 +114,9 @@ def register(reg: Registry) -> None:
                       Arg(("--verbose",), "full ptxas output in summary", action="store_true"),
                       Arg(("--no-discover",), "skip the GPU discovery rounds for prepare-time extensions (short "
                           "GPU jobs under the lock; nothing compiles there)", action="store_true"),
+                      Arg(("--clean-pending",), "first drop every pending (GPU-recorded, prepare-time) call "
+                          "of FILE(s); discovery records the current ones again (stale records of an edited file "
+                          "are dropped automatically)", action="store_true"),
                       Arg(("--discover-rounds",), "max build+discover rounds", type="int", default=6)],
                 effects=Effects(gpu="none", writes=("cache", "run_dir", "ledger")), long_running=True,
                 package=P)

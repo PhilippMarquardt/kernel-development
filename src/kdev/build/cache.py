@@ -138,22 +138,18 @@ def file_prebuilt(f: FileRef, toolchain: Toolchain, home: str | None = None) -> 
 
 def pending_for(path: str, toolchain: Toolchain, home: str | None = None) -> list[str]:
     """Names of extension calls a GPU worker recorded as missing for ``path`` (``<ext_root>/pending``; the
-    next ``kdev build`` of the file compiles them)."""
-    d = Path(ext_root(home, toolchain)) / "pending"
-    if not d.is_dir():
-        return []
-    out = []
-    for p in sorted(d.glob("*.json")):
-        try:
-            doc = json.loads(p.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if doc.get("tc_version") != tc_version(toolchain) or doc.get("tc_ptxas") != tc_ident(toolchain):
-            continue
-        owner = doc.get("file") or ""
-        if not owner or os.path.abspath(owner) == os.path.abspath(path):
-            out.append(str((doc.get("kw") or {}).get("name") or doc.get("key")))
-    return out
+    next ``kdev build`` of the file compiles them). Records made for an older content of ``path`` (owner md5
+    differs: the source was edited since that GPU run) are superseded and deleted here (board #78)."""
+    recs, _ = _shim.scan_pending(ext_root(home, toolchain), path, tc_version(toolchain), tc_ident(toolchain))
+    return [str((doc.get("kw") or {}).get("name") or doc.get("key")) for _, doc in recs]
+
+
+def clean_pending(path: str, toolchain: Toolchain, home: str | None = None) -> list[str]:
+    """Delete every pending record owned by ``path`` (any content; ``kdev build --clean-pending``) and the
+    stale ones; returns the removed record paths."""
+    _, removed = _shim.scan_pending(ext_root(home, toolchain), path, tc_version(toolchain), tc_ident(toolchain),
+                                    clean=True)
+    return removed
 
 
 def is_prebuilt(spec: JobSpec) -> bool:
