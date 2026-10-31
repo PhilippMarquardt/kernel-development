@@ -1,0 +1,161 @@
+"""Command registry: the single source of truth for the CLI (kdev.cli) and the MCP server (kdev.mcp).
+
+Owner: P1. Each package declares its commands in its own ``commands.py`` via ``register(reg)``; nobody edits
+``cli.py`` to add flags. See docs/PLAN.md section 2.1.
+"""
+from __future__ import annotations
+
+import importlib
+from argparse import Namespace
+from dataclasses import dataclass, field
+from typing import Any, Callable
+
+from kdev.contract import Effects, Result
+
+# Packages whose ``commands`` module is imported by build_registry(), in help order.
+COMMAND_MODULES = (
+    "kdev.core_commands",
+    "kdev.build.commands",
+    "kdev.checks.commands",
+    "kdev.timing.commands",
+    "kdev.sweep.commands",
+    "kdev.sass.commands",
+    "kdev.occupancy.commands",
+    "kdev.timeline.commands",
+    "kdev.floor.commands",
+    "kdev.observe.commands",
+    "kdev.service.commands",
+    "kdev.ledger.commands",
+    "kdev.judge.commands",
+    "kdev.dashboard.commands",
+    "kdev.remote.commands",
+    "kdev.mcp.commands",
+)
+
+
+@dataclass
+class Arg:
+    """One CLI/MCP parameter. ``flags[0]`` without a leading '-' is a positional."""
+
+    flags: tuple[str, ...]
+    help: str = ""
+    type: str = "str"              # str | int | float | bool | path
+    default: Any = None
+    choices: tuple[Any, ...] | None = None
+    nargs: str | None = None       # None | "?" | "*" | "+" | "..." (REMAINDER)
+    required: bool = False
+    action: str | None = None      # None | "store_true" | "append"
+    mcp: bool = True               # False = not exposed over MCP (safety)
+
+    @property
+    def positional(self) -> bool:
+        return not self.flags[0].startswith("-")
+
+    @property
+    def dest(self) -> str:
+        f = self.flags[0] if self.positional else next(x for x in self.flags if x.startswith("--"))
+        return f.lstrip("-").replace("-", "_").lower()
+
+
+@dataclass
+class Context:
+    """Per-invocation context handed to every handler."""
+
+    json: bool = False
+    agent: str = ""
+    home: str | None = None
+    problem: str | None = None
+    quiet: bool = False
+    config: Any = None   # kdev.config.Config, loaded lazily by P1
+    via: str = "cli"     # cli | mcp
+
+    def submit(self, spec: Any, *, detach: bool = False, direct: bool = False,
+               timeout_s: float | None = None) -> Result:
+        """Route a GPU JobSpec: service if up, else direct (flock) mode. Implemented by P1 using
+        ``kdev.service.client``. See PLAN 2.2."""
+        raise NotImplementedError("Context.submit (P1 + P2)")
+
+
+Handler = Callable[[Namespace, Context], Result]
+
+
+@dataclass
+class Command:
+    name: str                       # "ab", "sass diff", "job wait"
+    help: str
+    handler: Handler
+    args: list[Arg] = field(default_factory=list)
+    effects: Effects = field(default_factory=Effects)
+    gpu: bool = False               # adds GPU flags (--detach/--direct/--timeout/--priority/--run-name/--shapes)
+    long_running: bool = False
+    mcp: bool = True                # exposed over MCP at all
+    package: str = ""
+
+
+GPU_ARGS: list[Arg] = [
+    Arg(("--detach",), "enqueue and return the job id immediately", action="store_true"),
+    Arg(("--direct",), "no daemon: run in the foreground under the exclusive flock", action="store_true"),
+    Arg(("--timeout",), "job timeout in seconds", type="int", default=1800),
+    Arg(("--priority",), "queue priority (higher first)", type="int", default=0),
+    Arg(("--run-name",), "slug for the run directory", default=""),
+    Arg(("--shapes",), "substring filter over shape ids / cases", default=None),
+]
+
+GLOBAL_ARGS: list[Arg] = [
+    Arg(("--json",), "print exactly one JSON Result object", action="store_true", mcp=False),
+    Arg(("--problem",), "problem name or directory", default=None),
+    Arg(("--agent",), "agent name for attribution (default $KDEV_AGENT)", default=None),
+    Arg(("--home",), "KDEV_HOME override", default=None, mcp=False),
+    Arg(("--quiet",), "suppress next: hints", action="store_true", mcp=False),
+]
+
+
+class Registry:
+    def __init__(self) -> None:
+        self._cmds: dict[str, Command] = {}
+
+    def command(self, name: str, help: str, handler: Handler, *, args: list[Arg] | None = None,
+                effects: Effects | None = None, gpu: bool = False, long_running: bool = False,
+                mcp: bool = True, package: str = "") -> Command:
+        if name in self._cmds:
+            raise ValueError(f"duplicate command {name!r}")
+        cmd = Command(name, help, handler, list(args or []), effects or Effects(), gpu, long_running, mcp,
+                      package)
+        self._cmds[name] = cmd
+        return cmd
+
+    def get(self, name: str) -> Command:
+        return self._cmds[name]
+
+    def all(self) -> list[Command]:
+        return list(self._cmds.values())
+
+    def names(self) -> list[str]:
+        return list(self._cmds)
+
+    def resolve(self, argv: list[str]) -> tuple[Command | None, list[str]]:
+        """Longest-prefix match of argv words against command names ("sass diff" beats "sass")."""
+        for n in range(min(3, len(argv)), 0, -1):
+            name = " ".join(argv[:n])
+            if name in self._cmds:
+                return self._cmds[name], argv[n:]
+        return None, argv
+
+
+def build_registry(modules: tuple[str, ...] = COMMAND_MODULES) -> Registry:
+    reg = Registry()
+    for mod in modules:
+        importlib.import_module(mod).register(reg)
+    return reg
+
+
+def todo(target: str) -> Handler:
+    """Phase-0 placeholder handler: raises NotImplementedError naming the library function and owner.
+    The CLI/MCP turn it into a not_implemented Result (exit 14). Builders replace each todo(...) with a real
+    handler ``def cmd_x(args, ctx) -> Result``."""
+
+    def handler(args: Namespace, ctx: Context) -> Result:
+        raise NotImplementedError(target)
+
+    handler.__doc__ = f"TODO: {target}"
+    return handler

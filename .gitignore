@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+.coverage
+htmlcov/
+# kdev runtime state (never commit)
+.kdev/
+kdev_home/
+runs/
+*.db
+*.db-wal
+*.db-shm
+*.ncu-rep
+*.nsys-rep
+*.qdrep
+*.conflict-*
+# build artifacts
+*.so
+*.o
+*.cubin
+*.fatbin
+!tests/fixtures/**

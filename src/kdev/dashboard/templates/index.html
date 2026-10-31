@@ -1,0 +1,20 @@
+<!doctype html>
+<!-- kdev dashboard template (P8). render.py substitutes {{DATA_JSON}} and {{GENERATED}}. Self-contained:
+     no external scripts/styles. P8 designs the page; this is the Phase-0 placeholder. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kdev dashboard</title>
+<style>
+  :root { --bg: #ffffff; --fg: #1a1a1a; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111418; --fg: #e6e6e6; } }
+  body { background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; margin: 16px; }
+</style>
+</head>
+<body>
+<h1>kdev dashboard</h1>
+<p>generated {{GENERATED}}</p>
+<script id="kdev-data" type="application/json">{{DATA_JSON}}</script>
+</body>
+</html>

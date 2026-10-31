@@ -1,0 +1,286 @@
+vjc.cu(2348): warning #177-D: variable "IDX_SLOTS" was declared but never referenced
+    constexpr int IDX_SLOTS = 2 * STAGES;
+                  ^
+          detected during instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+vjc.cu(2419): warning #177-D: variable "w0g_rank" was declared but never referenced
+    int w0g_rank = 2, w0g_par = 0, w0g_gen = 0;
+        ^
+          detected during instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(2419): warning #177-D: variable "w0g_par" was declared but never referenced
+    int w0g_rank = 2, w0g_par = 0, w0g_gen = 0;
+                      ^
+          detected during instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(2419): warning #177-D: variable "w0g_gen" was declared but never referenced
+    int w0g_rank = 2, w0g_par = 0, w0g_gen = 0;
+                                   ^
+          detected during instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(2420): warning #177-D: variable "w0_smid" was declared but never referenced
+    unsigned w0_smid = 0;
+             ^
+          detected during instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(2421): warning #177-D: variable "w0_rank" was declared but never referenced
+    int w0_rank = 0;
+        ^
+          detected during instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(662): warning #177-D: variable "IDX_SLOTS" was declared but never referenced
+    constexpr int IDX_SLOTS = 2 * STAGES;
+                  ^
+          detected during:
+            instantiation of "void <unnamed>::attn_kernel<L,FLAT,MODE>(<unnamed>::Params) [with L=1, FLAT=false, MODE=2]" at line 2653
+            instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(554): warning #607-D: this pragma must immediately precede a statement
+  #pragma unroll 1
+          ^
+          detected during:
+            instantiation of "void <unnamed>::attn_kernel<L,FLAT,MODE>(<unnamed>::Params) [with L=1, FLAT=false, MODE=2]" at line 2653
+            instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(534): warning #177-D: variable "IDX_SLOTS" was declared but never referenced
+    constexpr int IDX_SLOTS = 2 * STAGES;
+                  ^
+          detected during:
+            instantiation of "void <unnamed>::attn_kernel<L,FLAT,MODE>(<unnamed>::Params) [with L=1, FLAT=false, MODE=2]" at line 2653
+            instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(1717): warning #177-D: variable "V16t" was declared but never referenced
+      uint8_t* V16t = V16 + 0;
+               ^
+          detected during:
+            instantiation of "void <unnamed>::attn_kernel<L,FLAT,MODE>(<unnamed>::Params) [with L=1, FLAT=false, MODE=2]" at line 2653
+            instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(1586): warning #177-D: variable "thr" was declared but never referenced
+    float thr[2] = {0.f, 0.f};
+          ^
+          detected during:
+            instantiation of "void <unnamed>::attn_kernel<L,FLAT,MODE>(<unnamed>::Params) [with L=1, FLAT=false, MODE=2]" at line 2653
+            instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(1596): warning #177-D: variable "ckey" was declared but never referenced
+    const int ckey = tid >> 2, cq = tid & 3;
+              ^
+          detected during:
+            instantiation of "void <unnamed>::attn_kernel<L,FLAT,MODE>(<unnamed>::Params) [with L=1, FLAT=false, MODE=2]" at line 2653
+            instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(1596): warning #177-D: variable "cq" was declared but never referenced
+    const int ckey = tid >> 2, cq = tid & 3;
+                               ^
+          detected during:
+            instantiation of "void <unnamed>::attn_kernel<L,FLAT,MODE>(<unnamed>::Params) [with L=1, FLAT=false, MODE=2]" at line 2653
+            instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(1639): warning #177-D: variable "i_lo" was declared but never referenced
+    uint32_t i_lo = 0, i_span = 0;
+             ^
+          detected during:
+            instantiation of "void <unnamed>::attn_kernel<L,FLAT,MODE>(<unnamed>::Params) [with L=1, FLAT=false, MODE=2]" at line 2653
+            instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(1639): warning #177-D: variable "i_span" was declared but never referenced
+    uint32_t i_lo = 0, i_span = 0;
+                       ^
+          detected during:
+            instantiation of "void <unnamed>::attn_kernel<L,FLAT,MODE>(<unnamed>::Params) [with L=1, FLAT=false, MODE=2]" at line 2653
+            instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(1658): warning #177-D: variable "i_cur" was declared but never referenced
+    int i_cur = 0, cnt2 = 0;
+        ^
+          detected during:
+            instantiation of "void <unnamed>::attn_kernel<L,FLAT,MODE>(<unnamed>::Params) [with L=1, FLAT=false, MODE=2]" at line 2653
+            instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(1658): warning #177-D: variable "cnt2" was declared but never referenced
+    int i_cur = 0, cnt2 = 0;
+                   ^
+          detected during:
+            instantiation of "void <unnamed>::attn_kernel<L,FLAT,MODE>(<unnamed>::Params) [with L=1, FLAT=false, MODE=2]" at line 2653
+            instantiation of "void launch<L>(const <unnamed>::Params &, dim3, cudaStream_t, int, __nv_bool) [with L=1]" at line 2789
+
+vjc.cu(28): warning #177-D: member "<unnamed>::Cfg<L, F>::BASEREGS [with L=8, F=false]" was declared but never referenced
+    static constexpr int BASEREGS = (65536 / (2 * NTX)) / 8 * 8 > 255 ? 248 : (65536 / (2 * NTX)) / 8 * 8;
+                         ^
+
+vjc.cu(29): warning #177-D: member "<unnamed>::Cfg<L, F>::PREGS [with L=8, F=false]" was declared but never referenced
+    static constexpr int PREGS = (L == 1) ? 56 : 32;
+                         ^
+
+vjc.cu(30): warning #177-D: member "<unnamed>::Cfg<L, F>::CREGS [with L=8, F=false]" was declared but never referenced
+    static constexpr int CREGS = ((BASEREGS * NTX - PREGS * NP) / (NT > 0 ? NT : 1)) / 8 * 8 > 248
+                         ^
+
+vjc.cu(28): warning #177-D: member "<unnamed>::Cfg<L, F>::BASEREGS [with L=1, F=false]" was declared but never referenced
+    static constexpr int BASEREGS = (65536 / (2 * NTX)) / 8 * 8 > 255 ? 248 : (65536 / (2 * NTX)) / 8 * 8;
+                         ^
+
+vjc.cu(29): warning #177-D: member "<unnamed>::Cfg<L, F>::PREGS [with L=1, F=false]" was declared but never referenced
+    static constexpr int PREGS = (L == 1) ? 56 : 32;
+                         ^
+
+vjc.cu(30): warning #177-D: member "<unnamed>::Cfg<L, F>::CREGS [with L=1, F=false]" was declared but never referenced
+    static constexpr int CREGS = ((BASEREGS * NTX - PREGS * NP) / (NT > 0 ? NT : 1)) / 8 * 8 > 248
+                         ^
+
+vjc.cu(44): warning #177-D: variable "<unnamed>::IDX_SLOTS" was declared but never referenced
+  constexpr int IDX_SLOTS = 2 * STAGES;
+                ^
+
+vjc.cu(125): warning #177-D: function "<unnamed>::bar_sync_n" was declared but never referenced
+                            void bar_sync_n(int id, int n) { asm volatile("bar.sync %0, %1;\n" ::"r"(id), "r"(n) : "memory"); }
+                                 ^
+
+vjc.cu(126): warning #177-D: function "<unnamed>::bar_arrive_n" was declared but never referenced
+                            void bar_arrive_n(int id, int n) { asm volatile("bar.arrive %0, %1;\n" ::"r"(id), "r"(n) : "memory"); }
+                                 ^
+
+vjc.cu(163): warning #177-D: function "<unnamed>::ex2h2" was declared but never referenced
+                            uint32_t ex2h2(float lo, float hi) {
+                                     ^
+
+vjc.cu(255): warning #177-D: function "<unnamed>::desc_sw128" was declared but never referenced
+                            uint64_t desc_sw128(uint32_t addr) {
+                                     ^
+
+vjc.cu(259): warning #177-D: function "<unnamed>::wgmma_m64n64k32_e4m3" was declared but never referenced
+                            void wgmma_m64n64k32_e4m3(float* d, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3,
+                                 ^
+
+vjc.cu(392): warning #177-D: function "<unnamed>::cl_gid" was declared but never referenced
+                            int cl_gid(const Params& p) {
+                                ^
+
+ptxas info    : 11 bytes gmem
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb1ELi0EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb1ELi0EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 80 registers, used 16 barriers
+ptxas info    : Compile time = 387.512 ms
+ptxas info    : Function properties for _ZN36_INTERNAL_5234c7d1_6_vjc_cu_0b177e6638_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611ws_patch_niILi8ELi256ELb0ENS0_4SmemILi8ELb1EEEEEbPT2_iiiiii
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Function properties for _ZN36_INTERNAL_5234c7d1_6_vjc_cu_0b177e6638_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e669spin_failEv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi15EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi15EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 96 registers, used 16 barriers
+ptxas info    : Compile time = 93.474 ms
+ptxas info    : Function properties for _ZN36_INTERNAL_5234c7d1_6_vjc_cu_0b177e6638_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e669spin_failEv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi13EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi13EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 106 registers, used 16 barriers
+ptxas info    : Compile time = 100.631 ms
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi11EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi11EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 111 registers, used 16 barriers
+ptxas info    : Compile time = 122.837 ms
+ptxas info    : Function properties for _ZN36_INTERNAL_5234c7d1_6_vjc_cu_0b177e6638_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e669spin_failEv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi9EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi9EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 118 registers, used 16 barriers
+ptxas info    : Compile time = 129.967 ms
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi7EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi7EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 96 registers, used 16 barriers
+ptxas info    : Compile time = 91.039 ms
+ptxas info    : Function properties for _ZN36_INTERNAL_5234c7d1_6_vjc_cu_0b177e6638_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e669spin_failEv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi5EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi5EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 106 registers, used 16 barriers
+ptxas info    : Compile time = 98.050 ms
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi3EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi3EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 119 registers, used 16 barriers
+ptxas info    : Compile time = 118.650 ms
+ptxas info    : Function properties for _ZN36_INTERNAL_5234c7d1_6_vjc_cu_0b177e6638_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e669spin_failEv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi1EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi1EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 125 registers, used 16 barriers
+ptxas info    : Compile time = 126.045 ms
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi2EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi8ELb0ELi2EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 111 registers, used 16 barriers
+ptxas info    : Compile time = 149.179 ms
+ptxas info    : Function properties for _ZN36_INTERNAL_5234c7d1_6_vjc_cu_0b177e6638_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6613cluster_multiILi8ENS0_4SmemILi8ELb0EEEEEbRKNS0_6ParamsERT0_iiiiiPfS9_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb1ELi0EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb1ELi0EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 3 barriers
+ptxas info    : Compile time = 160.284 ms
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi15EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi15EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 107 registers, used 1 barriers
+ptxas info    : Compile time = 81.980 ms
+ptxas info    : Function properties for _ZN36_INTERNAL_5234c7d1_6_vjc_cu_0b177e6638_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e669spin_failEv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi13EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi13EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 96 registers, used 1 barriers
+ptxas info    : Compile time = 81.723 ms
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi11EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi11EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 122 registers, used 1 barriers
+ptxas info    : Compile time = 111.781 ms
+ptxas info    : Function properties for _ZN36_INTERNAL_5234c7d1_6_vjc_cu_0b177e6638_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e669spin_failEv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi9EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi9EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 118 registers, used 1 barriers
+ptxas info    : Compile time = 109.534 ms
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi7EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi7EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 96 registers, used 1 barriers
+ptxas info    : Compile time = 80.054 ms
+ptxas info    : Function properties for _ZN36_INTERNAL_5234c7d1_6_vjc_cu_0b177e6638_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e669spin_failEv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi5EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi5EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 96 registers, used 1 barriers
+ptxas info    : Compile time = 81.494 ms
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi3EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi3EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 124 registers, used 1 barriers
+ptxas info    : Compile time = 114.039 ms
+ptxas info    : Function properties for _ZN36_INTERNAL_5234c7d1_6_vjc_cu_0b177e6638_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e669spin_failEv
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi1EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi1EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 123 registers, used 1 barriers
+ptxas info    : Compile time = 110.466 ms
+ptxas info    : Compiling entry function '_ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi2EEEvNS_6ParamsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN38_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6611attn_kernelILi1ELb0ELi2EEEvNS_6ParamsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 103 registers, used 1 barriers
+ptxas info    : Compile time = 161.726 ms
+ptxas info    : Function properties for _ZN36_INTERNAL_5234c7d1_6_vjc_cu_0b177e6638_GLOBAL__N__5234c7d1_6_vjc_cu_0b177e6613cluster_multiILi1ENS0_4SmemILi1ELb0EEEEEbRKNS0_6ParamsERT0_iiiiiPfS9_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
