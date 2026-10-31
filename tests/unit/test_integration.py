@@ -181,3 +181,39 @@ def test_pending_prepare_time_extension_roundtrip(monkeypatch, tmp_path):
     assert b.build_pending(str(tmp_path / "other.py")) == [] and not built      # other owner: untouched
     keys = b.build_pending(sub)
     assert built[0][0] == "prep_ext" and len(keys) == 1 and not pend[0].exists()
+
+
+def test_build_discover_loop_rebuilds_until_complete(tmp_path):
+    from kdev.build.commands import _discover_loop
+
+    f = tmp_path / "sub.py"
+    f.write_text("x = 1\n", encoding="utf-8")
+    answers = iter([Result(tool="discover", verdict="pending", summary={"pending": 3, "pending_names": ["a"]}),
+                    Result(tool="discover", verdict="pending", summary={"pending": 1}),
+                    Result(tool="discover", verdict="complete", summary={"pending": 0})])
+    subs, rebuilt = [], []
+    ctx = types.SimpleNamespace(problem=None, agent="t", submit=lambda spec: (subs.append(spec), next(answers))[1])
+    rep = types.SimpleNamespace(ok=True)
+    out, rounds, warns = _discover_loop(str(f), rep, lambda p: (rebuilt.append(p), rep)[1], {}, [], ctx)
+    assert [r["pending"] for r in rounds] == [3, 1, 0] and len(rebuilt) == 2 and not warns
+    assert all(s.kind == "discover" and not s.requires_prebuilt and s.lane == "gpu" for s in subs)
+
+    def boom(spec):
+        raise KdevError(ErrorCode.CAPABILITY_UNAVAILABLE, "no gpu")
+
+    ctx.submit = boom
+    _, rounds, warns = _discover_loop(str(f), rep, lambda p: rep, {}, [], ctx)
+    assert rounds == [] and "discovery skipped" in warns[0]
+
+
+def test_hook_discover_mode_records_and_stubs(monkeypatch, tmp_path):
+    from kdev.build import _shim
+
+    monkeypatch.setattr(_shim, "_ACTIVE", [])
+    monkeypatch.delenv("KDEV_LEGACY_EXT", raising=False)
+    _fake_torch(monkeypatch)
+    h = _shim.Hook(mode="use", ext_root=str(tmp_path / "c"), tc_version="13.0", tc_ptxas="p")
+    h.discover = True
+    m = h._call("load_inline", ("prep_ext", "cpp"), {"cuda_sources": "k"})
+    assert m.anything(1, 2) is None and h.records[-1]["status"] == "pending"
+    assert len(list((tmp_path / "c" / "pending").glob("*.json"))) == 1

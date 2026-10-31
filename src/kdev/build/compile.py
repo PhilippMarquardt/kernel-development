@@ -59,6 +59,10 @@ class BuildReport:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    @property
+    def ok(self) -> bool:
+        return not any(e.startswith(("build_failed", "toolchain_mismatch")) for e in self.errors)
+
 
 def _arch(pin: Toolchain) -> str:
     return os.environ.get("KDEV_ARCH") or pin.extra.get("arch") or "sm_90a"
@@ -256,6 +260,17 @@ def _build_py(path: str, report: BuildReport, pin: Toolchain, home: str | None, 
     for e in out.get("errors", []):
         if e.startswith("extension ") and not any(e[10:40] in x for x in report.errors):
             report.errors.append(f"build_failed: {e[:300]}")
+    pp = out.get("prepare_pass")
+    if pp:
+        ok_steps, errs = pp.get("steps") or [], pp.get("errors") or []
+        msg = (f"warning: cpu prepare pass ({pp.get('seconds', 0)}s): {len(ok_steps)} step(s) ok, {len(errs)} "
+               "failed (extensions built before a failure are cached; the rest are recorded by the first GPU run "
+               "and built by the next `kdev build`)")
+        if errs:
+            msg += f"; first: {errs[0][:160]}"
+        report.errors.append(msg)
+    if out.get("pending_built"):
+        report.errors.append(f"warning: built {len(out['pending_built'])} pending call(s) recorded by a GPU run")
     report.extra_entries = out.get("entries_called", [])  # type: ignore[attr-defined]
     return recs
 

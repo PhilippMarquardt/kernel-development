@@ -154,6 +154,7 @@ class Hook:
         # another agent's next load recompile; the content-keyed kdev cache + pending records are the default.
         self.legacy_fallback = os.environ.get("KDEV_LEGACY_EXT") == "1"
         self.owner = ""          # submission file whose calls this hook currently serves (pending records)
+        self.discover = False    # use mode, discovery job: missing entries -> pending record + stub module
         self.real: dict = {}
 
     # -- the replacement for load_inline / load ------------------------------------------------------------
@@ -179,6 +180,11 @@ class Hook:
                     mod = self._legacy(kind, args, kwargs, rec)
                     if mod is not None:
                         return mod
+                if self.discover:          # discovery job: record, hand back a stub, keep going (no compile)
+                    rec["status"] = "pending"
+                    self.records.append(rec)
+                    self._record_pending(kind, kw, key)
+                    return _Stub(name)
                 if not self.allow_jit:
                     rec["status"] = "needs_build"
                     self.records.append(rec)
@@ -436,6 +442,8 @@ def main(argv: list[str]) -> int:
     with open(argv[1], encoding="utf-8") as f:
         spec = json.load(f)
     out = {"exts": [], "errors": [], "import_error": None, "entries_called": []}
+    if spec.get("mode", "build") == "build":
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""      # never a CUDA context in the build lane
     hook = Hook(mode=spec.get("mode", "build"), ext_root=spec["ext_root"], tc_version=spec.get("tc_version", ""),
                 tc_ptxas=spec.get("tc_ptxas", ""), knobs=spec.get("knobs") or {}, defines=spec.get("defines") or [],
                 force=bool(spec.get("force")))
@@ -465,6 +473,16 @@ def main(argv: list[str]) -> int:
         mod = None
     if mod is not None:
         out["entries_called"] = _call_entries(mod, list(spec.get("entries") or DEFAULT_ENTRIES), out["errors"])
+    if hook.mode == "build" and spec.get("prepare_pass", os.environ.get("KDEV_CPU_PREPARE") == "1")             and not out["import_error"]:
+        # prepare-time / first-call extensions: run load -> prepare -> kernel_fn per shape on the CPU with a
+        # faked torch.cuda (no CUDA context), so the hook sees and builds those load_inline calls too
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+            from kdev.build import _cpuprep  # noqa: PLC0415
+            out["prepare_pass"] = _cpuprep.run(path, cap=tuple(spec.get("cap") or (9, 0)),
+                                               budget_s=float(spec.get("prepare_budget_s", 900)))
+        except Exception as e:  # noqa: BLE001
+            out["prepare_pass"] = {"errors": [f"unavailable: {type(e).__name__}: {e}"], "steps": []}
     if hook.mode == "build":
         out["pending_built"] = hook.build_pending(path)
     _write(spec["out"], out, hook)

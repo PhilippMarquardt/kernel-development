@@ -55,6 +55,7 @@ KIND_TABLE: dict[str, str] = {
     "dispatch": "kdev.observe.dispatch:run_dispatch",
     "floor_calibrate": "kdev.floor.microbench:run_calibrate",
     "exec": "kdev.worker:run_exec",
+    "discover": "kdev.build.discover:run_discover",
 }
 
 # Every function in KIND_TABLE has this signature:

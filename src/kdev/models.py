@@ -11,7 +11,7 @@ from typing import Any, TypeVar
 JOB_SCHEMA = "kdev.job/1"
 
 JOB_KINDS = ("build", "check", "time", "ab", "sweep", "calib", "sanitize", "comply", "timeline", "profile",
-             "dispatch", "floor_calibrate", "exec")
+             "dispatch", "floor_calibrate", "exec", "discover")
 BUILD_LANE_KINDS = ("build",)
 
 T = TypeVar("T")
