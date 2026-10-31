@@ -11,12 +11,34 @@
 - Heartbeat every 5 s. SIGTERM/SIGINT: stop claiming, let the running GPU job finish up to 60 s, then kill
   it and mark ``timeout`` (partial raw.jsonl survives). Queue persists across restarts; jobs left 'running'
   by a dead daemon are marked failed(internal) on start.
+
+Implementation notes: build jobs are subprocesses (``python -m kdev.service._job``), not a multiprocessing
+pool, so each one can be killed/timed out alone and a crashing compiler never takes the daemon down. The
+build concurrency is capped by the cgroup CPU quota (RunPod: nproc=192 but ~20 usable CPUs) and 16.
+A second daemon on the same KDEV_HOME refuses to start (flock on $KDEV_HOME/serve.lock). ``stop`` works by
+a stop file ($KDEV_HOME/serve.stop, portable) plus SIGTERM on POSIX.
 """
 from __future__ import annotations
 
+import os
+import signal
+import subprocess
+import sys
+import threading
+import time
+import traceback
 from dataclasses import dataclass
+from pathlib import Path
 
 from kdev.config import Config
+from kdev.contract import ErrorCode
+from kdev.service import _jobrun, queue
+from kdev.service._common import build_worker_cap, pid_alive
+from kdev.service.lock import _FileLock, _kill_tree
+from kdev.util import utc_now
+
+HEARTBEAT_S = 5.0
+_STOP = threading.Event()
 
 
 @dataclass
@@ -27,20 +49,219 @@ class DaemonOptions:
     python: str = ""          # worker interpreter ("" = cfg.python or sys.executable)
 
 
+def _stop_file(cfg: Config) -> Path:
+    return Path(cfg.home) / "serve.stop"
+
+
+def _stopping(cfg: Config) -> bool:
+    if not _STOP.is_set() and _stop_file(cfg).exists():
+        _STOP.set()
+    return _STOP.is_set()
+
+
+def _recover(cfg: Config, conn) -> int:
+    """Jobs left 'running' by a dead daemon -> failed(internal); kill a surviving orphan worker first."""
+    n = 0
+    for row in conn.execute("SELECT job_id, pid FROM jobs WHERE state='running'").fetchall():
+        pid = row["pid"]
+        if pid and pid_alive(pid) and sys.platform != "win32":
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+        queue.finish(conn, row["job_id"], "failed", error_code=ErrorCode.INTERNAL.value)
+        queue.log_event(conn, "recovered", "daemon restarted while job was running", row["job_id"])
+        n += 1
+    return n
+
+
 def serve(cfg: Config, opts: DaemonOptions) -> int:
     """Main loop; returns the exit code."""
-    raise NotImplementedError("daemon.serve (P2)")
+    if opts.python:
+        cfg.python = opts.python
+    Path(cfg.home).mkdir(parents=True, exist_ok=True)
+    guard = _FileLock(str(Path(cfg.home) / "serve.lock"))
+    if not guard.try_acquire():
+        print(f"kdev serve: another daemon already serves {cfg.home}", file=sys.stderr)
+        guard.release()
+        return 1
+    _STOP.clear()
+    try:
+        _stop_file(cfg).unlink()
+    except OSError:
+        pass
+    if threading.current_thread() is threading.main_thread():
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                signal.signal(sig, lambda *_: _STOP.set())
+            except (ValueError, OSError):
+                pass
+    workers = build_worker_cap(opts.build_workers)
+    conn = queue.connect(cfg)
+    builds: dict[str, _jobrun.BuildTask] = {}
+    gpu_thread: threading.Thread | None = None
+    gpu_job: list[str | None] = [None]
+    try:
+        n = _recover(cfg, conn)
+        queue.log_event(conn, "serve_start", f"pid {os.getpid()} build_workers={workers} recovered={n}")
+        print(f"kdev serve: pid {os.getpid()} home {cfg.home} build_workers={workers} lock {cfg.lock_path}",
+              file=sys.stderr, flush=True)
+        last_hb = 0.0
+        while True:
+            stopping = _stopping(cfg)
+            if time.monotonic() - last_hb >= HEARTBEAT_S:
+                queue.heartbeat(conn, gpu_lane_job=gpu_job[0], build_workers=workers)
+                last_hb = time.monotonic()
+            # build lane: reap, then fill free slots
+            for job_id, task in list(builds.items()):
+                try:
+                    res = task.poll(cancel_fn=lambda j=job_id: queue.cancel_requested(conn, j), stop_fn=_STOP.is_set)
+                except Exception as e:  # noqa: BLE001
+                    traceback.print_exc()
+                    queue.finish(conn, job_id, "failed", error_code=ErrorCode.INTERNAL.value)
+                    queue.log_event(conn, "error", f"{type(e).__name__}: {e}", job_id)
+                    del builds[job_id]
+                    continue
+                if res is not None:
+                    queue.finish(conn, job_id, _jobrun.state_for(res), exit_code=res.exit_code,
+                                 error_code=res.error.code if res.error else None, run_id=task.rd.run_id,
+                                 run_dir=str(task.rd.path))
+                    del builds[job_id]
+            while not stopping and len(builds) < workers:
+                spec = queue.claim_next(conn, "build")
+                if spec is None:
+                    break
+                try:
+                    task = _jobrun.BuildTask(cfg, spec, _jobrun.prepare_run(cfg, spec))
+                    queue.set_running_info(conn, spec.job_id, run_id=task.rd.run_id, run_dir=str(task.rd.path))
+                    task.start()
+                    queue.set_running_info(conn, spec.job_id, pid=task.proc.pid if task.proc else None)
+                    queue.log_event(conn, "started", "build lane", spec.job_id)
+                    builds[spec.job_id] = task
+                except Exception as e:  # noqa: BLE001
+                    traceback.print_exc()
+                    queue.finish(conn, spec.job_id, "failed", error_code=ErrorCode.INTERNAL.value)
+                    queue.log_event(conn, "error", f"build start: {type(e).__name__}: {e}", spec.job_id)
+            # GPU lane: one at a time, in a thread so heartbeats and builds continue
+            if gpu_thread is not None and not gpu_thread.is_alive():
+                gpu_thread, gpu_job[0] = None, None
+            if gpu_thread is None and not stopping:
+                spec = queue.claim_next(conn, "gpu")
+                if spec is not None:
+                    gpu_job[0] = spec.job_id
+                    gpu_thread = threading.Thread(target=run_gpu_job, args=(cfg, spec.job_id), daemon=True,
+                                                  name=f"gpu-{spec.job_id}")
+                    gpu_thread.start()
+            if stopping and gpu_thread is None and not builds:
+                break
+            time.sleep(opts.poll_s)
+    finally:
+        for job_id, task in builds.items():
+            if task.proc is not None:
+                _kill_tree(task.proc)
+        if gpu_thread is not None:
+            gpu_thread.join(_jobrun.STOP_GRACE_S + 30)
+        try:
+            queue.log_event(conn, "serve_stop", f"pid {os.getpid()}")
+            queue.clear_heartbeat(conn)
+        finally:
+            conn.close()
+            try:
+                _stop_file(cfg).unlink()
+            except OSError:
+                pass
+            guard.release()
+    return 0
 
 
 def start_background(cfg: Config, opts: DaemonOptions) -> int:
     """Daemonise (setsid + nohup-style, log to $KDEV_HOME/serve.log); returns the pid."""
-    raise NotImplementedError("daemon.start_background (P2)")
+    Path(cfg.home).mkdir(parents=True, exist_ok=True)
+    if queue.daemon_alive(cfg):
+        hb = queue.heartbeat_row(cfg) or {}
+        return int(hb.get("pid") or 0)
+    argv = [sys.executable, "-m", "kdev", "serve", "run", "--foreground", "--build-workers", str(opts.build_workers),
+            "--home", str(cfg.home)]
+    env = dict(os.environ)
+    env["KDEV_HOME"] = str(cfg.home)
+    env["KDEV_LOCK_PATH"] = cfg.lock_path
+    src = str(Path(__file__).resolve().parents[2])
+    env["PYTHONPATH"] = src + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    if opts.python or cfg.python:
+        env["KDEV_PYTHON"] = opts.python or cfg.python
+    log = open(Path(cfg.home) / "serve.log", "a", encoding="utf-8")
+    log.write(f"\n[{utc_now()}] start: {' '.join(argv)}\n")
+    log.flush()
+    kw: dict = {"stdout": log, "stderr": subprocess.STDOUT, "stdin": subprocess.DEVNULL, "env": env,
+                "cwd": str(cfg.home)}
+    if sys.platform == "win32":
+        kw["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        kw["start_new_session"] = True
+    proc = subprocess.Popen(argv, **kw)
+    log.close()
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < 15:
+        if queue.daemon_alive(cfg):
+            break
+        if proc.poll() is not None:
+            break
+        time.sleep(0.2)
+    return proc.pid
 
 
 def stop(cfg: Config, timeout_s: float = 60) -> bool:
-    raise NotImplementedError("daemon.stop (P2)")
+    """Ask the daemon to stop (stop file + SIGTERM); True once it is gone (or was not running)."""
+    hb = queue.heartbeat_row(cfg) or {}
+    pid = hb.get("pid")
+    Path(cfg.home).mkdir(parents=True, exist_ok=True)
+    _stop_file(cfg).write_text(utc_now(), encoding="utf-8")
+    if pid and pid != os.getpid() and pid_alive(pid) and sys.platform != "win32":
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+    t0 = time.monotonic()
+    while time.monotonic() - t0 < timeout_s:
+        if not (pid and pid_alive(pid)):
+            return True
+        time.sleep(0.25)
+    return False
 
 
 def run_gpu_job(cfg: Config, job_id: str) -> None:
     """One GPU-lane job end to end (lock, worker subprocess, hold limits, ingest)."""
-    raise NotImplementedError("daemon.run_gpu_job (P2)")
+    conn = queue.connect(cfg)
+    try:
+        row = conn.execute("SELECT state FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        if row is None:
+            return
+        if row["state"] == "queued" and not queue.claim(conn, job_id):
+            return
+        if row["state"] not in ("queued", "running"):
+            return
+        spec = queue.get_spec(cfg, job_id)
+        spec.job_id = job_id
+        rd = _jobrun.prepare_run(cfg, spec)
+        queue.set_running_info(conn, job_id, run_id=rd.run_id, run_dir=str(rd.path))
+        out = _jobrun.run_gpu(
+            cfg, spec, rd,
+            cancel_fn=lambda: queue.cancel_requested(conn, job_id), stop_fn=_STOP.is_set,
+            on_pid=lambda pid: queue.set_running_info(conn, job_id, pid=pid),
+            on_event=lambda kind, msg: queue.log_event(conn, kind, msg, job_id))
+        for pid in out.offenders:
+            queue.log_event(conn, "not_exclusive", f"foreign pid {pid} during run", job_id)
+        res = out.result
+        queue.finish(conn, job_id, out.state, exit_code=res.exit_code,
+                     error_code=res.error.code if res.error else None, run_id=rd.run_id, run_dir=str(rd.path),
+                     waited_s=out.waited_s)
+    except Exception as e:  # noqa: BLE001  (never leave a job 'running')
+        traceback.print_exc()
+        try:
+            queue.finish(conn, job_id, "failed", error_code=ErrorCode.INTERNAL.value)
+            queue.log_event(conn, "error", f"{type(e).__name__}: {e}", job_id)
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        conn.close()
