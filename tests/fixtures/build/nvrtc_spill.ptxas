@@ -1,0 +1,12 @@
+ptxas info    : Overriding maximum register limit 256 for 'spill_k' with  64 of maxrregcount option
+ptxas info    : 0 bytes gmem
+ptxas info    : Compiling entry function 'spill_k' for 'sm_90a'
+ptxas info    : Function properties for spill_k
+ptxas         .     784 bytes stack frame, 388 bytes spill stores, 404 bytes spill loads
+ptxas info    : Used 64 registers, used 0 barriers, 784 bytes cumulative stack size
+ptxas info    : Compile time = 0.000 ms
+ptxas info    : Compiling entry function 'pdl_dot' for 'sm_90a'
+ptxas info    : Function properties for pdl_dot
+ptxas         .     0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 29 registers, used 0 barriers
+ptxas info    : Compile time = 0.000 ms

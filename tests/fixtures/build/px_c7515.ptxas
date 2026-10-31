@@ -1,0 +1,278 @@
+/root/vsgl/lib/python3.12/site-packages/torch/include/torch/headeronly/util/BFloat16.h(110): warning #20013-D: calling a constexpr __host__ function("bit_cast") from a __host__ __device__ function("round_to_nearest_even") is not allowed. The experimental flag '--expt-relaxed-constexpr' can be used to allow this.
+      const uint32_t U32 = c10::bit_cast<uint32_t>(src);
+                           ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/root/vsgl/lib/python3.12/site-packages/torch/include/torch/headeronly/util/BFloat16.h(110): warning #20015-D: calling a constexpr __host__ function from a __host__ __device__ function is not allowed. The experimental flag '--expt-relaxed-constexpr' can be used to allow this.
+      const uint32_t U32 = c10::bit_cast<uint32_t>(src);
+                                                  ^
+
+ext13/okc_prefill_moe_5467ad33381d2c84/cuda.cu(57): warning #550-D: variable "state" was set but never used
+    uint64_t state;
+             ^
+
+ext13/okc_prefill_moe_5467ad33381d2c84/cuda.cu(3559): warning #177-D: variable "npairs" was declared but never referenced
+    const int npairs = (T / L) * nqb * 2;
+              ^
+
+ext13/okc_prefill_moe_5467ad33381d2c84/cuda.cu(437): warning #177-D: variable "okc_moe::STG_BYTES" was declared but never referenced
+  constexpr int STG_BYTES = 45056;
+                ^
+
+ptxas info    : (C7515) Potential Performance Loss: wgmma.mma_async instructions are serialized due to non wgmma instructions defining accumulator registers of a wgmma between start and end of the pipeline stage in the function '_ZN8okc_attn15attn_fwd_kernelILi3ELi0ELb1ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE'
+ptxas info    : (C7515) Potential Performance Loss: wgmma.mma_async instructions are serialized due to non wgmma instructions defining accumulator registers of a wgmma between start and end of the pipeline stage in the function '_ZN8okc_attn15attn_fwd_kernelILi3ELi0ELb0ELb1ELb0ELb1ELb0ELb0ELb0EEEvNS_8AttnArgsE'
+ptxas info    : (C7515) Potential Performance Loss: wgmma.mma_async instructions are serialized due to non wgmma instructions defining accumulator registers of a wgmma between start and end of the pipeline stage in the function '_ZN8okc_attn15attn_fwd_kernelILi2ELi0ELb1ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE'
+ptxas info    : (C7515) Potential Performance Loss: wgmma.mma_async instructions are serialized due to non wgmma instructions defining accumulator registers of a wgmma between start and end of the pipeline stage in the function '_ZN8okc_attn15attn_fwd_kernelILi3ELi16ELb0ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE'
+ptxas info    : (C7515) Potential Performance Loss: wgmma.mma_async instructions are serialized due to non wgmma instructions defining accumulator registers of a wgmma between start and end of the pipeline stage in the function '_ZN8okc_attn15attn_fwd_kernelILi3ELi0ELb0ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE'
+ptxas info    : (C7515) Potential Performance Loss: wgmma.mma_async instructions are serialized due to non wgmma instructions defining accumulator registers of a wgmma between start and end of the pipeline stage in the function '_ZN8okc_attn15attn_fwd_kernelILi2ELi16ELb0ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE'
+ptxas info    : (C7515) Potential Performance Loss: wgmma.mma_async instructions are serialized due to non wgmma instructions defining accumulator registers of a wgmma between start and end of the pipeline stage in the function '_ZN8okc_attn15attn_fwd_kernelILi2ELi0ELb0ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE'
+ptxas info    : (C7515) Potential Performance Loss: wgmma.mma_async instructions are serialized due to non wgmma instructions defining accumulator registers of a wgmma between start and end of the pipeline stage in the function '_ZN8okc_attn18attn_fwd_sk_kernelILi3ELi0ELb0ELb0EEEvNS_8AttnArgsE'
+ptxas info    : (C7515) Potential Performance Loss: wgmma.mma_async instructions are serialized due to non wgmma instructions defining accumulator registers of a wgmma between start and end of the pipeline stage in the function '_ZN8okc_attn18attn_fwd_sk_kernelILi3ELi0ELb1ELb1EEEvNS_8AttnArgsE'
+ptxas info    : 163 bytes gmem
+ptxas info    : Compiling entry function '_ZN8okc_attn20attn_combine2_kernelILi2EEEvPKfiiPK13__nv_bfloat16PS3_ff' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn20attn_combine2_kernelILi2EEEvPKfiiPK13__nv_bfloat16PS3_ff
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 0 barriers
+ptxas info    : Compile time = 94.040 ms
+ptxas info    : Compiling entry function '_ZN8okc_attn15attn_fwd_kernelILi3ELi0ELb1ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn15attn_fwd_kernelILi3ELi0ELb1ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 2 barriers
+ptxas info    : Compile time = 315.215 ms
+ptxas info    : Compiling entry function '_ZN8okc_attn15attn_fwd_kernelILi3ELi0ELb0ELb1ELb0ELb1ELb0ELb0ELb0EEEvNS_8AttnArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn15attn_fwd_kernelILi3ELi0ELb0ELb1ELb0ELb1ELb0ELb0ELb0EEEvNS_8AttnArgsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 16 barriers
+ptxas info    : Compile time = 781.907 ms
+ptxas info    : Compiling entry function '_ZN8okc_attn15attn_fwd_kernelILi2ELi0ELb1ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn15attn_fwd_kernelILi2ELi0ELb1ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 168 registers, used 2 barriers
+ptxas info    : Compile time = 223.026 ms
+ptxas info    : Compiling entry function '_ZN8okc_attn15attn_fwd_kernelILi3ELi16ELb0ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn15attn_fwd_kernelILi3ELi16ELb0ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 2 barriers
+ptxas info    : Compile time = 288.360 ms
+ptxas info    : Compiling entry function '_ZN8okc_attn15attn_fwd_kernelILi3ELi0ELb0ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn15attn_fwd_kernelILi3ELi0ELb0ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 2 barriers
+ptxas info    : Compile time = 208.609 ms
+ptxas info    : Compiling entry function '_ZN8okc_attn15attn_fwd_kernelILi2ELi16ELb0ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn15attn_fwd_kernelILi2ELi16ELb0ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 168 registers, used 2 barriers
+ptxas info    : Compile time = 287.678 ms
+ptxas info    : Compiling entry function '_ZN8okc_attn15attn_fwd_kernelILi2ELi0ELb0ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn15attn_fwd_kernelILi2ELi0ELb0ELb0ELb0ELb0ELb0ELb0ELb0EEEvNS_8AttnArgsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 168 registers, used 2 barriers
+ptxas info    : Compile time = 212.018 ms
+ptxas info    : Compiling entry function '_ZN8okc_attn22attn_combine_sk_kernelILi2ELi24EEEvPKfPKiiiiPK13__nv_bfloat16PS5_ff' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn22attn_combine_sk_kernelILi2ELi24EEEvPKfPKiiiiPK13__nv_bfloat16PS5_ff
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 0 barriers
+ptxas info    : Compile time = 88.196 ms
+ptxas info    : Compiling entry function '_ZN8okc_attn18attn_fwd_sk_kernelILi3ELi0ELb0ELb0EEEvNS_8AttnArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn18attn_fwd_sk_kernelILi3ELi0ELb0ELb0EEEvNS_8AttnArgsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 2 barriers, 7168 bytes smem
+ptxas info    : Compile time = 299.044 ms
+ptxas info    : Compiling entry function '_ZN8okc_attn18attn_fwd_sk_kernelILi3ELi0ELb1ELb1EEEvNS_8AttnArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn18attn_fwd_sk_kernelILi3ELi0ELb1ELb1EEEvNS_8AttnArgsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 128 registers, used 16 barriers, 7168 bytes smem
+ptxas info    : Compile time = 804.849 ms
+ptxas info    : Compiling entry function '_ZN8okc_attn16attn_prep_kernelILi2EEEvPKhS2_PKiiiS4_iiiPhS5_i' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn16attn_prep_kernelILi2EEEvPKhS2_PKiiiS4_iiiPhS5_i
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 40 registers, used 1 barriers, 9216 bytes smem
+ptxas info    : Compile time = 82.819 ms
+ptxas info    : Compiling entry function '_ZN8okc_attn16attn_prep_kernelILi1EEEvPKhS2_PKiiiS4_iiiPhS5_i' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn16attn_prep_kernelILi1EEEvPKhS2_PKiiiS4_iiiPhS5_i
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 40 registers, used 1 barriers, 9216 bytes smem
+ptxas info    : Compile time = 20.016 ms
+ptxas info    : Compiling entry function '_ZN8okc_attn17attn_prep2_kernelEPKhS1_PKiiiS3_iiiPhS4_i' for 'sm_90a'
+ptxas info    : Function properties for _ZN8okc_attn17attn_prep2_kernelEPKhS1_PKiiiS3_iiiPhS4_i
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 1 barriers, 17408 bytes smem
+ptxas info    : Compile time = 82.544 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb0ELb1EiiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb0ELb1EiiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 31 registers, used 0 barriers
+ptxas info    : Compile time = 15.646 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb0ELb1EixEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb0ELb1EixEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 29 registers, used 0 barriers
+ptxas info    : Compile time = 15.707 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb0ELb1ExiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb0ELb1ExiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 31 registers, used 0 barriers
+ptxas info    : Compile time = 77.398 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb0ELb1ExxEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb0ELb1ExxEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 29 registers, used 0 barriers
+ptxas info    : Compile time = 15.652 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb0ELb0EiiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb0ELb0EiiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 27 registers, used 0 barriers
+ptxas info    : Compile time = 71.684 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb0ELb0EixEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb0ELb0EixEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 27 registers, used 0 barriers
+ptxas info    : Compile time = 5.950 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb0ELb0ExiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb0ELb0ExiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 27 registers, used 0 barriers
+ptxas info    : Compile time = 5.841 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb0ELb0ExxEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb0ELb0ExxEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 27 registers, used 0 barriers
+ptxas info    : Compile time = 5.904 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb1ELb1EiiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb1ELb1EiiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    48 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 1 barriers, 48 bytes cumulative stack size, 1024 bytes smem
+ptxas info    : Compile time = 91.608 ms
+ptxas info    : Function properties for __internal_trig_reduction_slowpathd
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb1ELb1EixEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb1ELb1EixEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    48 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 1 barriers, 48 bytes cumulative stack size, 1024 bytes smem
+ptxas info    : Compile time = 91.583 ms
+ptxas info    : Function properties for __internal_trig_reduction_slowpathd
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb1ELb1ExiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb1ELb1ExiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    48 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 1 barriers, 48 bytes cumulative stack size, 1024 bytes smem
+ptxas info    : Compile time = 29.583 ms
+ptxas info    : Function properties for __internal_trig_reduction_slowpathd
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb1ELb1ExxEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb1ELb1ExxEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    48 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 1 barriers, 48 bytes cumulative stack size, 1024 bytes smem
+ptxas info    : Compile time = 91.553 ms
+ptxas info    : Function properties for __internal_trig_reduction_slowpathd
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb1ELb0EiiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb1ELb0EiiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    48 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 1 barriers, 48 bytes cumulative stack size, 1024 bytes smem
+ptxas info    : Compile time = 84.665 ms
+ptxas info    : Function properties for __internal_trig_reduction_slowpathd
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb1ELb0EixEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb1ELb0EixEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    48 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 1 barriers, 48 bytes cumulative stack size, 1024 bytes smem
+ptxas info    : Compile time = 18.932 ms
+ptxas info    : Function properties for __internal_trig_reduction_slowpathd
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb1ELb0ExiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb1ELb0ExiEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    48 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 1 barriers, 48 bytes cumulative stack size, 1024 bytes smem
+ptxas info    : Compile time = 85.742 ms
+ptxas info    : Function properties for __internal_trig_reduction_slowpathd
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN7okc_moe14qk_prep_kernelILb1ELb0ExxEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe14qk_prep_kernelILb1ELb0ExxEEvPK13__nv_bfloat16PKT1_PKT2_PKfPhSC_SC_SB_SB_
+    48 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 32 registers, used 1 barriers, 48 bytes cumulative stack size, 1024 bytes smem
+ptxas info    : Compile time = 19.607 ms
+ptxas info    : Function properties for __internal_trig_reduction_slowpathd
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Compiling entry function '_ZN7okc_moe20moe_fused_persistentILi0EEEvNS_9FusedArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe20moe_fused_persistentILi0EEEvNS_9FusedArgsE
+    8 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 168 registers, used 2 barriers, 8 bytes cumulative stack size
+ptxas info    : Compile time = 1390.615 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe20moe_fused_persistentILi1EEEvNS_9FusedArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe20moe_fused_persistentILi1EEEvNS_9FusedArgsE
+    8 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 168 registers, used 2 barriers, 8 bytes cumulative stack size
+ptxas info    : Compile time = 2390.768 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe15boundary_kernelILi512ELb1ELb0ELi2EEEvPK13__nv_bfloat16PKfS3_S5_S5_S3_PfPS1_PiiS3_S6_S5_S5_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe15boundary_kernelILi512ELb1ELb0ELi2EEEvPK13__nv_bfloat16PKfS3_S5_S5_S3_PfPS1_PiiS3_S6_S5_S5_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 64 registers, used 1 barriers, 1024 bytes smem
+ptxas info    : Compile time = 85.021 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe15boundary_kernelILi512ELb0ELb0ELi1EEEvPK13__nv_bfloat16PKfS3_S5_S5_S3_PfPS1_PiiS3_S6_S5_S5_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe15boundary_kernelILi512ELb0ELb0ELi1EEEvPK13__nv_bfloat16PKfS3_S5_S5_S3_PfPS1_PiiS3_S6_S5_S5_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 64 registers, used 1 barriers, 1024 bytes smem
+ptxas info    : Compile time = 15.645 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe15boundary_kernelILi512ELb0ELb0ELi0EEEvPK13__nv_bfloat16PKfS3_S5_S5_S3_PfPS1_PiiS3_S6_S5_S5_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe15boundary_kernelILi512ELb0ELb0ELi0EEEvPK13__nv_bfloat16PKfS3_S5_S5_S3_PfPS1_PiiS3_S6_S5_S5_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 64 registers, used 1 barriers, 1024 bytes smem
+ptxas info    : Compile time = 14.161 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe15boundary_kernelILi512ELb1ELb0ELi0EEEvPK13__nv_bfloat16PKfS3_S5_S5_S3_PfPS1_PiiS3_S6_S5_S5_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe15boundary_kernelILi512ELb1ELb0ELi0EEEvPK13__nv_bfloat16PKfS3_S5_S5_S3_PfPS1_PiiS3_S6_S5_S5_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 64 registers, used 1 barriers, 1024 bytes smem
+ptxas info    : Compile time = 76.666 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe19moe_gemm_persistentILb0EEEvNS_4ArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe19moe_gemm_persistentILb0EEEvNS_4ArgsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 168 registers, used 2 barriers
+ptxas info    : Compile time = 1417.197 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe19moe_gemm_persistentILb1EEEvNS_4ArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe19moe_gemm_persistentILb1EEEvNS_4ArgsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 168 registers, used 2 barriers
+ptxas info    : Compile time = 1483.809 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe15moe_gemm_kernelILb0EEEvNS_4ArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe15moe_gemm_kernelILb0EEEvNS_4ArgsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 168 registers, used 2 barriers
+ptxas info    : Compile time = 1117.038 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe15moe_gemm_kernelILb1EEEvNS_4ArgsE' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe15moe_gemm_kernelILb1EEEvNS_4ArgsE
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 168 registers, used 2 barriers
+ptxas info    : Compile time = 1097.864 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe17moe_gather_kernelILb1EEEvPK13__nv_bfloat16S3_PKiS5_S5_S5_PhPiiS7_P4int4S7_S7_iS7_S7_S7_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe17moe_gather_kernelILb1EEEvPK13__nv_bfloat16S3_PKiS5_S5_S5_PhPiiS7_P4int4S7_S7_iS7_S7_S7_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 54 registers, used 1 barriers, 1024 bytes smem
+ptxas info    : Compile time = 192.058 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe17moe_gather_kernelILb0EEEvPK13__nv_bfloat16S3_PKiS5_S5_S5_PhPiiS7_P4int4S7_S7_iS7_S7_S7_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe17moe_gather_kernelILb0EEEvPK13__nv_bfloat16S3_PKiS5_S5_S5_PhPiiS7_P4int4S7_S7_iS7_S7_S7_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 39 registers, used 1 barriers, 1024 bytes smem
+ptxas info    : Compile time = 88.668 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe16kv_gather_kernelEPKhS1_PKiS3_PhS4_iiiii' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe16kv_gather_kernelEPKhS1_PKiS3_PhS4_iiiii
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 18 registers, used 0 barriers
+ptxas info    : Compile time = 4.371 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe18moe_combine_kernelEPK13__nv_bfloat16PKiS4_PKfS2_PS0_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe18moe_combine_kernelEPK13__nv_bfloat16PKiS4_PKfS2_PS0_
+    64 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 80 registers, used 1 barriers, 64 bytes cumulative stack size, 1024 bytes smem
+ptxas info    : Compile time = 104.429 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe16moe_route_kernelEPKfS1_PKiPiPfS4_S4_S4_iS4_S4_' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe16moe_route_kernelEPKfS1_PKiPiPfS4_S4_S4_iS4_S4_
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 53 registers, used 1 barriers, 1024 bytes smem
+ptxas info    : Compile time = 109.277 ms
+ptxas info    : Compiling entry function '_ZN7okc_moe15moe_plan_kernelEPKiPiP4int4S2_S2_i' for 'sm_90a'
+ptxas info    : Function properties for _ZN7okc_moe15moe_plan_kernelEPKiPiP4int4S2_S2_i
+    0 bytes stack frame, 0 bytes spill stores, 0 bytes spill loads
+ptxas info    : Used 62 registers, used 0 barriers
+ptxas info    : Compile time = 99.389 ms
