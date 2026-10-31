@@ -565,6 +565,7 @@ class Session:
     foreign_end: list[int] | None = None
     hook: Any = None                               # P5 load_inline hook (None: legacy ext dir / P5 absent)
     variants: dict[str, tuple[dict[str, Any], list[str]]] = field(default_factory=dict)  # label -> knobs, defines
+    placement: dict[str, Any] = field(default_factory=dict)   # judge mode: data_ptr classes (timing.placement)
     pads: list[Any] = field(default_factory=list)  # judge-mode prepare pads (kept alive: they shape placement)
     pad_bytes: dict[str, int] = field(default_factory=dict)
     shape_overhead: dict[str, dict[str, Any]] = field(default_factory=dict)  # judge mode: per-shape 2*one-two
@@ -665,6 +666,8 @@ def open_session(spec: JobSpec, run_dir: Any, files: list[_File]) -> Session:
                 ss.modules[f.label] = mod
                 if pad_rng is not None:      # judge setup.prepare_pad: random 8-32 MB allocated before prepare
                     nb = pad_rng.randrange(8 << 20, 32 << 20) & ~4095
+                    if extra.get("pad_fixed_mb"):            # --pad-mb: same pad in every process (standardized)
+                        nb = int(float(extra["pad_fixed_mb"]) * (1 << 20)) & ~4095
                     ss.pads.append(torch.empty(nb, dtype=torch.uint8, device="cuda"))
                     ss.pad_bytes[f.label] = nb
                 ss.states[f.label] = ss.adapter.prepare(mod)
@@ -908,17 +911,27 @@ def render_lines(tool: str, verdict: str, rows: list[dict[str, Any]], score: dic
     # ~judge column: the first non-base label's time x the kdev calib table ratio ('?' = small/uncertain)
     est_lb = next((lb for lb in labels if lb != BASE_LABEL and any(
         p.get("label") == lb and p.get("judge_est") for r in rows for p in r.get("per_file") or [])), None)
+    multi = sum(1 for r in rows[:1] for _ in (r.get("ratios") or [])) > 1     # ab with 3+ files (board #90)
     lines.append("shape".ljust(34) + "".join(f"{lb[:10]:>11}" for lb in labels)
-                 + (f"{'~J ' + est_lb[:6]:>11}" if est_lb else "") + "   speedup [95% CI]   verdict")
+                 + (f"{'~J ' + est_lb[:6]:>11}" if est_lb else "")
+                 + ("   speedup vs ref per file (+ faster - slower = same)" if multi else "   speedup [95% CI]   verdict"))
     for r in rows[:max_rows]:
         us = {p["label"]: p["median_us"] for p in r["per_file"]}
         rt = r.get("ratio") or {}
         sp = (f"x{rt['speedup']:.3f} [{rt['speedup_ci'][0]:.3f}, {rt['speedup_ci'][1]:.3f}]"
               if rt.get("speedup") else "-")
+        if multi:
+            mk = {"faster": "+", "slower": "-", "same": "=", "incorrect": "!", "suspect": "?"}
+            sp = " ".join(f"{x['num']} x{x['speedup']:.3f}{mk.get(x.get('verdict', ''), ' ')}"
+                          for x in r.get("ratios") or [] if x.get("speedup"))
         est = ""
         if est_lb:
             e = next((p.get("judge_est") for p in r["per_file"] if p.get("label") == est_lb), None)
             est = f"{(_fmt_us(e['judge_est_us']) + ('?' if e['small'] else ' ')) if e else '- ':>11}"
+        if multi:
+            lines.append(r["shape_id"][:33].ljust(34) + "".join(f"{_fmt_us(us.get(lb)):>11}" for lb in labels)
+                         + est + f"   {sp}")
+            continue
         lines.append(r["shape_id"][:33].ljust(34) + "".join(f"{_fmt_us(us.get(lb)):>11}" for lb in labels)
                      + est + f"   {sp:<22} {r.get('verdict', '')}")
     if len(rows) > max_rows:
@@ -984,9 +997,14 @@ def _run(spec: JobSpec, run_dir: Any, kind: str) -> Result:
     jm = JM.enabled(spec.params or {})
     if jm and kind == "ab":
         return JM.run_ab_judge(spec, run_dir)
+    phased = _phased_lock(run_dir) if jm else None
+    if phased is not None:
+        phased.prepare()            # SHARED flock before any CUDA context exists
     ad, _, _ = resolve_adapter(spec)
     files = _files_for(spec, kind, lambda: ad.baseline_path())
     ss = open_session(spec, run_dir, files)
+    if phased is not None:
+        _phased_enter_timed(ss, phased)
     try:
         if jm:
             JM.time_shapes_judge(ss)
@@ -1054,6 +1072,10 @@ def _run(spec: JobSpec, run_dir: Any, kind: str) -> Result:
             res.warnings.append(f"{cal['small_sub_shapes']} shape(s) < {calibtab.SMALL_US:.0f} us: ~judge us "
                                 f"uncertain (+-{calibtab.SMALL_ABS_US} us judge overhead spread); compare absolute us")
     res.lines = render_lines(kind, verdict, rows, score, fid, labels)
+    if phased is not None:
+        res.summary["phase"] = phased.facts.to_dict()
+    if getattr(ss, "placement", None):
+        res.summary["placement"] = ss.placement
     if jm:
         res.summary.update(mode="judge", protocol=JM.PROTOCOL_TAG, pad_bytes=ss.pad_bytes,
                            first=(ss.params.extra or {}).get("first", "baseline"))
@@ -1070,6 +1092,28 @@ def _run(spec: JobSpec, run_dir: Any, kind: str) -> Result:
                                   recovery="re-run under the GPU lock with no other GPU processes")
     write_json(run_dir, "shapes.json", rows)
     return res
+
+
+def _phased_lock(run_dir: Any) -> Any:
+    """service.phase.PhasedLock when the GPU lane left the locking to this worker (KDEV_PHASED=1)."""
+    from kdev.service.phase import PhasedLock
+    from kdev.timing._io import log
+
+    return PhasedLock.from_env(log=lambda m: log(run_dir, m))
+
+
+def _phased_enter_timed(ss: Session, phased: Any) -> None:
+    """Prepare done (shared): synchronize (no queued GPU work while parked), park until our go token, take
+    the flock EXCLUSIVE (held until exit), then re-read the facts the timed section depends on."""
+    import torch
+
+    from kdev.timing import _env
+
+    torch.cuda.synchronize()
+    phased.park()
+    phased.exclusive()
+    ss.foreign_start = _env.foreign_contexts()
+    ss.clocks_before = _env.gpu_state()
 
 
 def _isolated_dispatch(spec: JobSpec, run_dir: Any, kind: str) -> tuple[dict[str, Any] | None, list[str]]:

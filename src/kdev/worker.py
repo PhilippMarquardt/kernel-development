@@ -186,6 +186,21 @@ def _install_signals(timeout_s: int | None) -> Callable[[], None]:
     return restore
 
 
+def _shared_phase(run_dir: Any) -> Any:
+    """Untimed GPU job under the phased lock (``KDEV_PHASE_MODE=shared``, service.phase): take a prepare slot
+    and the SHARED flock before any CUDA work; both are held until the process exits."""
+    if os.environ.get("KDEV_PHASE_MODE") != "shared":
+        return None
+    from kdev.service.phase import PhasedLock
+    from kdev.timing._io import log
+
+    pl = PhasedLock.from_env(log=lambda m: log(run_dir, m))
+    if pl is not None:
+        pl.prepare()
+        log(run_dir, "phase: shared lock " + " ".join(f"{k}={v}" for k, v in pl.facts.to_dict().items()))
+    return pl
+
+
 def execute(spec: JobSpec, run_dir_path: str | None = None) -> Result:
     """Run one job in this process and write its artifacts; never raises (errors become Results)."""
     from kdev.timing._io import log, run_id, run_path, write_json
@@ -211,7 +226,10 @@ def execute(spec: JobSpec, run_dir_path: str | None = None) -> Result:
             raise KdevError(ErrorCode.QUOTA_FORBIDDEN, "deny-listed command (judge CLI quota command)",
                             recovery="judge runs are never started by kdev jobs")
         fn = resolve(spec.kind)
+        shared = _shared_phase(run_dir)
         res = fn(spec, run_dir)
+        if shared is not None and isinstance(res, Result):
+            res.summary = dict(res.summary or {}, phase=dict(shared.facts.to_dict(), mode="shared"))
         if not isinstance(res, Result):
             raise KdevError(ErrorCode.INTERNAL, f"{spec.kind} returned {type(res).__name__}, not a Result")
     except KdevError as e:

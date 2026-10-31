@@ -267,6 +267,13 @@ def run_gpu(cfg: Config, spec: JobSpec, rd: Any, *, cancel_fn: Flag = _never, st
         save_result(cfg, rd, res)
         return GpuOutcome(res, "failed")
 
+    from kdev.service import phase
+
+    pmode = phase.mode(spec)
+    if pmode is not None:
+        out = _run_phased_child(cfg, spec, rd, cancel_fn, stop_fn, on_pid, ev, pmode)
+        save_result(cfg, rd, out.result)
+        return out
     lock_wait = spec.timeout_s if lock_timeout_s is None else lock_timeout_s
     try:
         def progress(msg: str) -> None:
@@ -307,6 +314,88 @@ def _attach_queue(res: Result, grant: lock.LockGrant) -> None:
                 + ")"]
     except Exception:  # noqa: BLE001
         pass
+
+
+def _run_phased_child(cfg: Config, spec: JobSpec, rd: Any, cancel_fn: Flag, stop_fn: Flag,
+                      on_pid: Callable[[int], None] | None, ev: Callable[[str, str], None],
+                      pmode: str = "phased") -> GpuOutcome:
+    """Phased lock (service.phase): the worker takes the flock itself, SHARED for prepare and EXCLUSIVE
+    for the timed section (ab: each ABBA child process does). This process holds no lock and never
+    touches CUDA; it enforces timeout/cancel. Exclusivity is reported by the worker."""
+    argv, cwd = _child_argv(cfg, spec, rd)
+    limit = float(spec.timeout_s or 0) or float("inf")
+    _log(rd, f"phased lock ({pmode}): " + ("prepare shared, timed section exclusive" if pmode == "phased" else
+                                           "untimed job, shared for its whole life") + f" ({cfg.lock_path})")
+    ev("started", f"{pmode} lock (the worker takes the flock itself)")
+    t0 = time.monotonic()
+    for attempt in range(MAX_REQUEUE + 1):
+        out = _phased_once(cfg, spec, rd, argv, cwd, t0, limit, cancel_fn, stop_fn, on_pid, ev, pmode)
+        err = out.result.error
+        if err is None or not (err.details or {}).get("phase_requeue") or attempt == MAX_REQUEUE:
+            return out
+        _log(rd, f"phased: gave way to a non-kdev lock holder; restarting the worker ({attempt + 1})")
+        try:
+            (Path(rd.path) / "result.json").unlink()
+        except OSError:
+            pass
+    return out
+
+
+MAX_REQUEUE = 5
+
+
+def _phased_once(cfg: Config, spec: JobSpec, rd: Any, argv: list[str], cwd: str, t0: float, limit: float,
+                 cancel_fn: Flag, stop_fn: Flag, on_pid: Callable[[int], None] | None,
+                 ev: Callable[[str, str], None], pmode: str = "phased") -> GpuOutcome:
+    killed = ""
+    with open(Path(rd.path) / "log.txt", "a", encoding="utf-8") as log_f:
+        log_f.write(f"[kdev {utc_now()}] gpu lane (phased): {' '.join(argv)}\n")
+        log_f.flush()
+        env = dict(child_env(cfg, spec, no_cuda=False), KDEV_LOG_CAPTURED="1", KDEV_PHASED="1",
+                   KDEV_PHASE_MODE=pmode)
+        env.pop("KDEV_EXCLUSIVE", None)
+        try:
+            proc = lock.spawn(argv, stdout=log_f, stderr=subprocess.STDOUT, cwd=cwd, env=env)
+        except (FileNotFoundError, PermissionError) as e:
+            return GpuOutcome(error_result(spec, rd, ErrorCode.INVALID_REQUEST, f"cannot start {argv[0]}: {e}"),
+                              "failed")
+        if on_pid:
+            on_pid(proc.pid)
+        stop_t: float | None = None
+        try:
+            while proc.poll() is None:
+                el = time.monotonic() - t0
+                if el > limit:
+                    killed = "timeout"
+                elif cancel_fn():
+                    killed = "cancelled"
+                elif stop_fn():
+                    stop_t = stop_t or time.monotonic()
+                    if time.monotonic() - stop_t > STOP_GRACE_S:
+                        killed = "stopped"
+                if killed:
+                    ev("kill", f"{killed} after {el:.0f}s")
+                    lock._kill_tree(proc)
+                    break
+                time.sleep(0.2)
+        except BaseException:
+            lock._kill_tree(proc)
+            raise
+        rc = proc.returncode
+    el = time.monotonic() - t0
+    if killed == "cancelled":
+        res = error_result(spec, rd, ErrorCode.CANCELLED, f"cancelled after {el:.0f}s")
+    elif killed:
+        res = error_result(spec, rd, ErrorCode.TIMEOUT, f"GPU job killed: {killed} after {el:.0f}s",
+                           recovery="partial samples (raw.jsonl) are kept; raise --timeout or split the job")
+    else:
+        res = load_result(rd, spec) or error_result(
+            spec, rd, ErrorCode.INTERNAL, f"worker exited {rc} without result.json", recovery="see log.txt")
+    res.job_id = spec.job_id
+    res.run_id = res.run_id or rd.run_id
+    ph = (res.summary or {}).get("phase") if isinstance(res.summary, dict) else None
+    waited = float((ph or {}).get("ex_wait_s", 0) or 0) + float((ph or {}).get("sh_wait_s", 0) or 0)
+    return GpuOutcome(res, state_for(res), waited)
 
 
 def _child_argv(cfg: Config, spec: JobSpec, rd: Any) -> tuple[list[str], str]:
@@ -365,7 +454,7 @@ def _run_locked_child(cfg: Config, spec: JobSpec, rd: Any, grant: lock.LockGrant
                     log_f.flush()
                 if time.monotonic() - last_poll >= FOREIGN_POLL_S:
                     last_poll = time.monotonic()
-                    own = {os.getpid(), proc.pid} | descendants(proc.pid)
+                    own = {os.getpid(), proc.pid} | descendants(proc.pid) | lock.idle_pids(cfg)
                     for a in lock.foreign_apps(apps(), own):
                         if a.pid not in violators:
                             violators[a.pid] = a

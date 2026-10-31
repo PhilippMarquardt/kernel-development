@@ -160,3 +160,34 @@ def test_infer_problem(monkeypatch):
     assert board.infer_problem([], cwd="/root") is None
     monkeypatch.setenv("KDEV_PROBLEM", "kdev")
     assert board.infer_problem([], cwd="/root/okc/muse_moe_w4a16/x") == "kdev"
+
+
+def test_render_ab_three_files_rows_for_each_vs_a():
+    """board #90: ab with 3+ files prints every X/A per shape, not only B/A."""
+    from kdev.adapters.base import Shape
+
+    shapes = [Shape("s1", {}, weight=1.0, load="L"), Shape("s2", {}, weight=1.0, load="L")]
+    a, b, c = {"s1": 10.0, "s2": 10.0}, {"s1": 9.0, "s2": 10.0}, {"s1": 10.0, "s2": 12.0}
+    labels = ["A", "B", "C"]
+    seq = JM.proc_sequence(labels)
+    data = {"A": a, "B": b, "C": c}
+    procs = [_proc(lb, data[lb], seed=i) for i, lb in enumerate(seq)]
+    rows, score, verdict = JM.aggregate(procs, labels, shapes, _fallback_score(shapes), 0.01, n_boot=100)
+    lines = JM.render_ab(verdict, rows, score, labels, seq)
+    assert any(ln.strip().startswith("B/A score") for ln in lines)
+    assert any(ln.strip().startswith("C/A score") for ln in lines)
+    s1 = next(ln for ln in lines if ln.startswith("s1"))
+    s2 = next(ln for ln in lines if ln.startswith("s2"))
+    assert s1.split()[2:].count("+") == 1 and s1.split()[-1] == "=" and "x1.11" in s1
+    assert s2.split()[-1] == "-" and "x0.83" in s2
+
+
+def test_render_lines_fast_three_files():
+    from kdev.timing.engine import render_lines
+
+    rt = lambda num, sp, v: {"num": num, "den": "A", "speedup": sp, "speedup_ci": [sp, sp], "verdict": v}  # noqa: E731
+    rows = [{"shape_id": "s1", "per_file": [{"label": x, "median_us": 10.0} for x in "ABC"],
+             "ratio": rt("B", 1.1, "faster"), "ratios": [rt("B", 1.1, "faster"), rt("C", 0.9, "slower")],
+             "verdict": "faster"}]
+    lines = render_lines("ab", "faster", rows, None, None, ["A", "B", "C"])
+    assert "B x1.100+ C x0.900-" in lines[-1]

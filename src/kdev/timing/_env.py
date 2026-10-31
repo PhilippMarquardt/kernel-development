@@ -88,6 +88,12 @@ def foreign_contexts() -> list[int] | None:
     if not out and not _have_smi():
         return None
     mine = _ancestors()
+    try:
+        from kdev.service.phase import idle_pids
+
+        mine |= idle_pids()                     # parked/ready phased kdev workers: idle contexts
+    except Exception:  # noqa: BLE001
+        pass
     pids = []
     for line in out.splitlines():
         try:

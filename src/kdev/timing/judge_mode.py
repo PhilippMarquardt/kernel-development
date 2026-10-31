@@ -107,6 +107,7 @@ def time_shapes_judge(ss: Any) -> None:
             t = E.TorchTimer(ss.adapter, modules, ss.states, sh, seed, ss.params, flusher=ss.flusher,
                              overhead=ss.overhead, select=ss.select, inputs=d)
             try:
+                _record_placement(ss, sh.shape_id, t, cap_order, first=(i == 0))
                 for lb in cap_order:
                     t.replay_us(lb)
                 rec: list[tuple[str, int, int, float]] = []
@@ -151,6 +152,27 @@ def time_shapes_judge(ss: Any) -> None:
     except KdevError as e:
         ss.error = e.info()
         ss.log(f"stopped: {e.code.value}: {e.message} (partial samples kept)")
+
+
+def _record_placement(ss: Any, sid: str, t: Any, labels: list[str], first: bool) -> None:
+    """data_ptr % 2 MiB / % 64 KiB of the weights (prepare state + module globals) and the captured outputs
+    of every label (kdev.timing.placement); stored in ss.placement, reported in summary.placement."""
+    from kdev.timing import placement as P
+
+    try:
+        pl = getattr(ss, "placement", None)
+        if pl is None:
+            pl = ss.placement = {}
+        for lb in labels:
+            d = pl.setdefault(lb, {"outputs": {}})
+            if first:
+                w = P.tensors_in(ss.states.get(lb), "state") + P.tensors_in(ss.modules.get(lb), "", depth=2)
+                d["weights"] = P.describe(w)
+                d["weights_class"] = d["weights"]["class"]
+            d["outputs"][sid] = P.describe(P.tensors_in(t._outs.get(lb), "out"), top=4)
+            d["outputs_class"] = "|".join(v["class"] for v in d["outputs"].values())
+    except Exception as e:  # noqa: BLE001  (logging only: never break timing)
+        ss.warnings.append(f"placement logging failed: {type(e).__name__}: {e}"[:160])
 
 
 def annotate_time(ss: Any, rows: list[dict[str, Any]], fid: Fidelity) -> None:
@@ -241,6 +263,134 @@ def _run_child(child: JobSpec, d: str, timeout_s: float, python: str | None = No
     except ValueError:
         return {"status": "error", "error": {"code": "internal", "message": f"child rc={p.returncode}, no Result",
                                              "recovery": f"see {d}/stderr.txt"}}, d
+
+
+MIN_FREE_MIB = 30000          # phased ab: start a non-head child only with this much free GPU memory
+MAX_REQUEUE = 5
+
+
+def _gpu_free_mib() -> int | None:
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=20, check=False).stdout
+        return int(out.split()[0])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _requeue(r: dict[str, Any]) -> bool:
+    from kdev.service.phase import REQUEUE_FLAG
+
+    e = r.get("error") or {}
+    return bool((e.get("details") or {}).get(REQUEUE_FLAG))
+
+
+def _phased_children(spec: JobSpec, seq: list[str], by_label: dict[str, FileRef], rp: str, deadline: float,
+                     log: Callable[[str], None], *, try_slot: Callable[[], int | None] | None = None,
+                     python: str | None = None, free_mib: Callable[[], int | None] = _gpu_free_mib) -> Any:
+    """Phased lock (service.phase): ABBA children start as soon as a prepare slot (and GPU memory) is free
+    and prepare concurrently under the SHARED flock; each times under the EXCLUSIVE flock only after the
+    previous process of the sequence has exited (go token), so the A B B A timing order is kept. This
+    process holds one slot per started child (kept across a child's requeue) and never touches CUDA.
+    Yields (i, label, Result dict, dir) in sequence order."""
+    from kdev.service import phase
+
+    slot_fn = try_slot or phase.try_slot
+    n = len(seq)
+    slots: dict[int, int] = {}
+    procs: dict[int, tuple[subprocess.Popen, str]] = {}
+    attempts = [0] * n
+    st = {"head": 0, "nxt": 0}     # head: first unfinished process (it holds the go token)
+    min_free = int(os.environ.get("KDEV_PHASE_MIN_FREE_MIB", MIN_FREE_MIB))
+
+    def start(i: int) -> None:
+        lb = seq[i]
+        left = deadline - time.time()
+        if left < 60:
+            raise KdevError(ErrorCode.TIMEOUT, f"ab --judge-mode: no time left for process {i + 1}/{n}",
+                            recovery="raise --timeout or time fewer shapes (--shapes)")
+        d = os.path.join(rp, f"p{i}_{lb}" + (f"_r{attempts[i]}" if attempts[i] else ""))
+        os.makedirs(d, exist_ok=True)
+        jp = os.path.join(d, "job.json")
+        with open(jp, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(_child_spec(spec, by_label[lb], i, int(left - 20)).to_dict()))
+        go = os.path.join(d, "go")
+        if i == st["head"]:
+            open(go, "w").close()
+        env = dict(os.environ, KDEV_PHASED="1", KDEV_PHASE_GO=go, KDEV_PHASE_SLOT_FD=str(slots[i]))
+        with open(os.path.join(d, "stdout.txt"), "w", encoding="utf-8") as out, \
+                open(os.path.join(d, "stderr.txt"), "w", encoding="utf-8") as err:
+            p = subprocess.Popen([python or sys.executable, "-m", "kdev.worker", jp, "--run-dir", d], stdout=out,
+                                 stderr=err, env=env, pass_fds=(slots[i],), stdin=subprocess.DEVNULL)
+        procs[i] = (p, d)
+        log(f"process {i + 1}/{n}: {lb} ({os.path.basename(by_label[lb].path)}) started (phased"
+            + (f", attempt {attempts[i] + 1}" if attempts[i] else "") + ")")
+
+    def result_of(d: str, rc: int | None) -> dict[str, Any]:
+        try:
+            with open(os.path.join(d, "stdout.txt"), encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+            return json.loads(next((ln for ln in reversed(lines) if ln.strip().startswith("{")), ""))
+        except (OSError, ValueError):
+            return {"status": "error", "error": {"code": "internal", "message": f"child rc={rc}, no Result",
+                                                 "recovery": f"see {d}/stderr.txt"}}
+
+    try:
+        while st["head"] < n:
+            head = st["head"]
+            while st["nxt"] < n and (st["nxt"] == head or min_free <= 0 or (free_mib() or 0) >= min_free):
+                fd = slot_fn()
+                if fd is None:
+                    break
+                slots[st["nxt"]] = fd
+                start(st["nxt"])
+                st["nxt"] += 1
+            if time.time() > deadline:
+                raise KdevError(ErrorCode.TIMEOUT, "ab --judge-mode: timeout", recovery="raise --timeout")
+            p, d = procs.get(head, (None, ""))
+            if p is None or p.poll() is None:
+                for j, (q, dj) in list(procs.items()):
+                    if j == head or q.poll() is None:
+                        continue
+                    r = result_of(dj, q.returncode)      # a parked child exited early: requeue or error
+                    if _requeue(r) and attempts[j] < MAX_REQUEUE:
+                        attempts[j] += 1
+                        start(j)
+                    else:
+                        if not r.get("error"):
+                            r = {"status": "error", "error": {"code": "internal", "message": "child exited before "
+                                                              "its go token", "recovery": f"see {dj}/log.txt"}}
+                        yield j, seq[j], r, dj
+                        return
+                time.sleep(0.2)
+                continue
+            r = result_of(d, p.returncode)
+            if _requeue(r) and attempts[head] < MAX_REQUEUE:
+                attempts[head] += 1
+                log(f"process {head + 1}/{n}: gave way to a non-kdev lock holder, restarting")
+                start(head)
+                continue
+            os.close(slots.pop(head))
+            procs.pop(head)
+            st["head"] = head + 1
+            if head + 1 in procs:
+                open(os.path.join(procs[head + 1][1], "go"), "w").close()
+            yield head, seq[head], r, d
+            if r.get("error"):
+                return
+    finally:
+        for q, _ in procs.values():
+            if q.poll() is None:
+                q.terminate()
+                try:
+                    q.wait(10)
+                except subprocess.TimeoutExpired:
+                    q.kill()
+        for fd in slots.values():
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def _load_samples(d: str) -> list[Sample]:
@@ -392,6 +542,8 @@ def render_ab(verdict: str, rows: list[dict[str, Any]], score: dict[str, Any], l
         head += f"  {d['num']}/{d['den']} score x{d['median']:.4f} [{d['ci_lo']:.4f}, {d['ci_hi']:.4f}] halves {hs}"
     vb = score.get("vs_base", {}).get("per_file", {})
     lines = [head, "vs SGLang: " + "  ".join(f"{lb} x{vb[lb]:.4f}" for lb in labels if lb in vb)]
+    if len(labels) > 2:
+        return lines + render_multi(rows, score, labels, max_rows)
     lb = labels[1] if len(labels) > 1 else ref
     lines.append("shape".ljust(22) + f"{ref + ' RAW':>8}{lb + ' RAW':>8}   dRAW (halves)    "
                  f"{ref + ' us':>7}{lb + ' us':>8}  {lb}/{ref} speedup [95% CI]  verdict")
@@ -406,6 +558,40 @@ def render_ab(verdict: str, rows: list[dict[str, Any]], score: dict[str, Any], l
     if len(rows) > max_rows:
         lines.append(f"... {len(rows) - max_rows} more rows in table.md")
     return lines
+
+
+V_MARK = {"faster": "+", "slower": "-", "same": "=", "incorrect": "!", "suspect": "?"}
+
+
+def render_multi(rows: list[dict[str, Any]], score: dict[str, Any], labels: list[str], max_rows: int = 30
+                 ) -> list[str]:
+    """ab with 3+ files (board #90): per shape, every X vs the reference A: RAW delta (us), judge speedup
+    and verdict mark (+ faster, - slower, = same, ! incorrect); one score line per X."""
+    ref, others = labels[0], labels[1:]
+    out = []
+    for lb in others:
+        pf, ci = (score.get("per_file") or {}).get(lb), (score.get("ci") or {}).get(lb)
+        hs = " ".join(f"x{h:.4f}" for h in (score.get("halves") or {}).get(lb, []))
+        if pf:
+            out.append(f"  {lb}/{ref} score x{pf:.4f}" + (f" [{ci[0]:.4f}, {ci[1]:.4f}]" if ci else "")
+                       + (f" halves {hs}" if hs else ""))
+    out.append("shape".ljust(22) + f"{ref + ' RAW':>8}" + "".join(f"  {lb + ' dRAW  x/' + ref:>16}" for lb in others)
+               + "   (+ faster - slower = same ! incorrect)")
+    for r in rows[:max_rows]:
+        pf = {p["label"]: p for p in r["per_file"]}
+        rts = {rt["num"]: rt for rt in r.get("ratios") or []}
+        cells = []
+        for lb in others:
+            rt = rts.get(lb) or {}
+            if not rt:
+                cells.append(f"{'-':>18}")
+                continue
+            cells.append(f"  {rt.get('delta_raw_us', float('nan')):+6.2f} x{rt.get('speedup', float('nan')):.3f}"
+                         f" {V_MARK.get(rt.get('verdict', ''), ' ')}".rjust(18))
+        out.append(r["shape_id"][:22].ljust(22) + _f(pf.get(ref, {}).get("median_raw_us"), 8) + "".join(cells))
+    if len(rows) > max_rows:
+        out.append(f"... {len(rows) - max_rows} more rows in table.md")
+    return out
 
 
 def run_ab_judge(spec: JobSpec, run_dir: Any) -> Result:
@@ -427,19 +613,28 @@ def run_ab_judge(spec: JobSpec, run_dir: Any) -> Result:
     fid: Fidelity | None = None
     warnings: list[str] = []
     excl = []
+    placements: list[tuple[str, dict[str, Any]]] = []
     deadline = t0 + float(spec.timeout_s or 1800)
-    for i, lb in enumerate(seq):
-        left = deadline - time.time()
-        if left < 60:
-            raise KdevError(ErrorCode.TIMEOUT, f"ab --judge-mode: no time left for process {i + 1}/{len(seq)}",
-                            recovery="raise --timeout or time fewer shapes (--shapes)")
-        child = _child_spec(spec, by_label[lb], i, int(left - 20))
-        d = os.path.join(rp, f"p{i}_{lb}")
-        log(run_dir, f"process {i + 1}/{len(seq)}: {lb} ({os.path.basename(by_label[lb].path)})")
-        res, d = _run_child(child, d, left - 10)
+
+    def sequential() -> Any:
+        for i, lb in enumerate(seq):
+            left = deadline - time.time()
+            if left < 60:
+                raise KdevError(ErrorCode.TIMEOUT, f"ab --judge-mode: no time left for process {i + 1}/{len(seq)}",
+                                recovery="raise --timeout or time fewer shapes (--shapes)")
+            child = _child_spec(spec, by_label[lb], i, int(left - 20))
+            d = os.path.join(rp, f"p{i}_{lb}")
+            log(run_dir, f"process {i + 1}/{len(seq)}: {lb} ({os.path.basename(by_label[lb].path)})")
+            res, d = _run_child(child, d, left - 10)
+            yield i, lb, res, d
+
+    phased = os.environ.get("KDEV_PHASED") == "1" and sys.platform != "win32"
+    it = _phased_children(spec, seq, by_label, rp, deadline, lambda m: log(run_dir, m)) if phased else sequential()
+    for i, lb, res, d in it:
         children.append({"proc": i, "label": lb, "dir": d, "run_id": res.get("run_id"), "status": res.get("status"),
                          "verdict": res.get("verdict"), "prepare_s": (res.get("summary") or {}).get("prepare_s"),
-                         "pad_bytes": (res.get("summary") or {}).get("pad_bytes")})
+                         "pad_bytes": (res.get("summary") or {}).get("pad_bytes"),
+                         "phase": (res.get("summary") or {}).get("phase")})
         if res.get("error"):
             e = res["error"]
             r = Result(tool="ab", status="error", verdict="error", run_id=run_id(run_dir), job_id=spec.job_id or None,
@@ -455,6 +650,7 @@ def run_ab_judge(spec: JobSpec, run_dir: Any) -> Result:
                 fid = Fidelity(**{k: v for k, v in f0.items() if k in Fidelity.__dataclass_fields__})
         data = proc_shape_data(_load_samples(d), lb)
         procs.append((lb, data))
+        placements.append((lb, ((res.get("summary") or {}).get("placement") or {}).get(lb) or {}))
         if res.get("status") == "fail":
             warnings.append(f"p{i} {lb}: check FAILED ({res.get('verdict')}), see {d}")
     shapes: list[Any] = []
@@ -479,13 +675,27 @@ def run_ab_judge(spec: JobSpec, run_dir: Any) -> Result:
     if fid is not None:
         worst = next((x for x in ("fail", "shared", "unknown", "waited") if x in excl), "ok")
         fid.exclusive = worst
+    from kdev.timing import placement as P
+
+    pwarn = P.compare(placements, labels)
+    warnings = pwarn + warnings
     write_json(run_dir, "shapes.json", rows)
     E.write_table(run_dir, rows, labels + [BASE])
     res = Result(tool="ab", status="fail" if verdict == "incorrect" else "ok", verdict=verdict,
                  run_id=run_id(run_dir), job_id=spec.job_id or None, shapes=rows, score=score, fidelity=fid,
                  files={"table": os.path.join(rp, "table.md"), "log": os.path.join(rp, "log.txt")},
                  warnings=warnings[:20])
+    for c, (_, pl) in zip(children, placements):
+        c["placement"] = {"weights": pl.get("weights_class"), "outputs": pl.get("outputs_class")}
+    phs = [c["phase"] for c in children if c.get("phase")]
+    lock_s = None
+    if phs:
+        lock_s = {"phased": True, "ex_wait_s": round(sum(p.get("ex_wait_s", 0) for p in phs), 1),
+                  "prepare_s": round(sum(p.get("prepare_s", 0) for p in phs), 1),
+                  "parked_s": round(sum(p.get("parked_s", 0) for p in phs), 1),
+                  "deferred": sum(p.get("deferred", 0) for p in phs)}
     res.summary = {"labels": labels, "ref": labels[0], "mode": "judge", "protocol": PROTOCOL_TAG, "procs": seq,
+                   **({"phase": lock_s} if lock_s else {}),
                    "children": children, "n_shapes": len(rows), "reps": (spec.params or {}).get("reps"),
                    "elapsed_s": round(time.time() - t0, 1),
                    "verdicts": {v: sum(1 for r in rows if r.get("verdict") == v)

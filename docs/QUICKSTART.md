@@ -10,7 +10,10 @@ GPU commands (`check`, `time`, `ab`, `calib`, `dispatch`, ...) queue behind the 
 same lock `/root/gpu_run.sh` uses. They never compile while holding it. Build first; for long runs use
 `--detach` and then `kdev job wait JOB`. While waiting they print the queue position and ETA every 30 s
 (`kdev queue status` lists the whole lock queue); `--priority N` makes a job go before lower-priority kdev
-jobs (gpu_run.sh jobs keep their kernel queue order).
+jobs (gpu_run.sh jobs keep their kernel queue order). The lock is phased (PROTOCOL 10): judge-mode `time`/`ab`
+processes prepare under a SHARED lock (prepares of several jobs overlap) and take it EXCLUSIVE only for the
+timed section; `kdev build`'s discovery and `kdev check` run SHARED (they never overlap a timed section).
+`--no-phased` restores the whole-process exclusive hold.
 
 ## The 10 commands, in order
 
@@ -22,7 +25,7 @@ jobs (gpu_run.sh jobs keep their kernel queue order).
 | 4 | `kdev check FILE` | Correctness: fresh seeds, extra shapes, eager and graph, repeats. Reports `nondeterministic` (ulp ≤ 1 is fine), `intermittent` or `wrong`. |
 | 5 | `kdev time FILE [--judge-mode]` | Judge-protocol timing against `baseline.py`: graph replay, 256 MB read flush, 4.0 us overhead, 5 seeds, exclusive GPU. It also runs a dispatch probe in a separate process and reports which kernels actually ran for each shape. |
 | 6 | `kdev calib FILE:JUDGE.json` | Compares local and judge results per shape (sub and baseline us separately) and records the per-shape judge/local ratio in the calibration table (`kdev calib table PROBLEM`). `time`/`ab` then add a `~J` column (estimated judge us; `?` = shape < 6 us, overhead-dominated). Local and judge differ per shape by ~2.5 % median (judge-side: per-shape overhead, node, its faster SGLang baseline), so compare absolute sub us, not local speedups. On a `DISAGREE`, explain it before you trust local A/B on that problem. |
-| 7 | `kdev ab BEST.py CAND.py [--set B:K=V]` | On OKC problems: judge mode (PROTOCOL 9): one process per file in ABBA order (A B B A), each with the SGLang baseline prepared first and replayed interleaved, fresh inputs per pair, prepare pads, gate, per-shape `2*one-two`. Prints per-shape RAW deltas (both half-blocks) and the judge-formula us/score. `faster`/`slower` need the CI and both half-blocks to agree. `--fast` = the old single-process mode (quick screening; it misses baseline-interleaving effects of ~0.3 us). This is the only way to compare two files. |
+| 7 | `kdev ab BEST.py CAND.py [--set B:K=V]` | On OKC problems: judge mode (PROTOCOL 9): one process per file in ABBA order (A B B A), each with the SGLang baseline prepared first and replayed interleaved, fresh inputs per pair, prepare pads, gate, per-shape `2*one-two`. Prints per-shape RAW deltas (both half-blocks) and the judge-formula us/score. `faster`/`slower` need the CI and both half-blocks to agree. `--fast` = the old single-process mode (quick screening; it misses baseline-interleaving effects of ~0.3 us). This is the only way to compare two files. With 3+ files every X/A is printed per shape (dRAW, speedup, `+ - =`). Each process logs buffer placement (`data_ptr % 2MB`); a `PLACEMENT:` warning means A and B landed differently: re-run with `--pad-mb 16` (same pads) or more `--rounds`. |
 | 8 | `kdev sweep FILE --grid "K=a,b K2=c"` | Searches cheap knobs exhaustively before any rewrite. Builds in parallel, runs the prepare-time discovery per point (short GPU jobs; `--no-discover` skips), quick-checks, then batches an ab against the base. |
 | 9 | `kdev sass FILE --kernel RE --loops` (+ `kdev sass diff A B`) | Hot-loop opcode mix and audits (pdl, spills, serialize, repeat, invariant). You need it for any "at the limit" claim. The pdl audit names the parameter each pre-wait load reads (`p.seq_lens x8 (cuda.cu:2444 ...)`); a read-only input is allowlisted in the source with `// kdev:pdl-allow seq_lens -- why` (or `FILE.pdl-allow`). |
 | 10 | `kdev note "CLAIM" --kind limit --evidence RUN_SASS,RUN_SWEEP` / `kdev idea resolve ID ...` | Writes the result, with its run ids and the exact variant, to the board. |

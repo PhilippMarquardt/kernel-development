@@ -185,3 +185,34 @@ twice; per-shape RAW delta = mean(B a/b) - mean(A a/b); judge self-noise = |base
 
 Judge self-noise MAE: p1 0.20 us, p3 0.13 us, so judge mode is at the judge's own noise level. An ABBA run of
 30 bf16 shapes takes ~80 s (4 processes x ~20 s).
+
+## 10. Phased GPU lock (lock only the timed part; `service/phase.py`)
+
+The flock on `/root/gpu.lock` stays the one `/root/gpu_run.sh` takes (`flock 9` = exclusive). kdev now also
+uses it SHARED:
+
+| job | lock |
+|---|---|
+| `time --judge-mode`, every child process of a judge-mode `ab` | prepare (CUDA init, load, pads, `prepare()`, flush buffer) SHARED; then `torch.cuda.synchronize()`, park (idle), EXCLUSIVE for the timed section until the process exits (graph capture, warm-up, timed reps, verification, overhead graphs, dispatch probe, CUDA teardown) |
+| `discover` (prepare-time extension discovery of `kdev build`), `check` (not `--cold`) | SHARED for the whole job (untimed) |
+| everything else, gpu_run.sh | EXCLUSIVE for the whole job (unchanged) |
+
+Guarantees: a timed section never overlaps a prepare/discover/check of any process (SH and EX exclude each
+other in the kernel). During a timed section the only other CUDA contexts allowed are *parked/ready* kdev
+workers: synchronized, blocked in a flock wait, no queued work (registry `$KDEV_HOME/phase/procs/<pid>.json`,
+pid + start-time checked). All foreign-context checks (kdev lock, worker start/mid/end, lane violator poll)
+ignore exactly those pids. gpu_run.sh still waits for every context, so a parked worker gives way: if the
+lock is held >= 6 s with no kdev holder registered, it exits and is restarted (fresh prepare).
+
+Fairness: a preparer takes one of `$KDEV_PHASE_SLOTS` (6) prepare slots (bounds parked GPU memory; an `ab`
+parent also needs `KDEV_PHASE_MIN_FREE_MIB` = 30000 free before starting a non-head child), then defers while
+an EX waiter that queued before it exists (FIFO with gpu_run.sh / exclusive kdev jobs) or a phased process
+is ready to time (writer preference: timed sections run back to back, prepares batch). `ab` judge mode starts
+its ABBA children as slots allow; they prepare concurrently and time strictly in A B B A order (go token =
+previous process exited). Opt out: `--no-phased`, `KDEV_PHASED=0`. Results carry `summary.phase`
+{slot_wait_s, sh_wait_s, prepare_s, parked_s, ex_wait_s, foreign_wait_s, deferred, exclusive}.
+
+Placement: judge-mode processes record `summary.placement[label]` (weights = prepare state + module globals,
+outputs per shape: top tensors' `data_ptr % 2 MiB`, `% 64 KiB`, class A = 2 MiB aligned / B = 64 KiB / C);
+`ab` warns `PLACEMENT: ... class differs` when the compared files' processes differ. `--pad-mb N` uses the
+same N MB pad before every prepare (standardized), `--pad-seed S` re-randomizes the 8-32 MB pads.

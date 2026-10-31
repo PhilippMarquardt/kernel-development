@@ -34,6 +34,12 @@ JUDGE_ARGS = [
         choices=("baseline", "submission"), default=None),
     Arg(("--no-pad",), "judge mode: no random 8-32 MB prepare pads", action="store_true"),
     Arg(("--judge-json",), "judge mode: take the per-case input seeds from this judge JSON", type="path", default=None),
+    Arg(("--pad-mb",), "judge mode: standardize the prepare pads: N MB before every prepare in every process "
+        "(default: random 8-32 MB per prepare)", type="float", default=None),
+    Arg(("--pad-seed",), "judge mode: base seed of the random prepare pads (randomize placement differently)",
+        type="int", default=None),
+    Arg(("--no-phased",), "judge mode: hold the exclusive GPU lock for the whole process (old behaviour) instead "
+        "of prepare under a shared lock + exclusive timed section", action="store_true"),
 ]
 
 GPU_FX = Effects(gpu="queued", writes=("run_dir", "ledger"))
@@ -122,6 +128,12 @@ def judge_params(args: Namespace, d: dict[str, Any]) -> dict[str, Any]:
         ex["seeds_from_judge"] = os.path.abspath(os.path.expanduser(jj))
     if _get(args, "rounds"):
         ex["rounds"] = int(args.rounds)
+    if _get(args, "pad_mb") is not None:
+        ex["pad_fixed_mb"] = float(args.pad_mb)
+    if _get(args, "pad_seed") is not None:
+        ex["pad_seed"] = int(args.pad_seed)
+    if _get(args, "no_phased", False):
+        ex["phased"] = False
     d["extra"] = ex
     return d
 

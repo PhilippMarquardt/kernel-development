@@ -275,6 +275,32 @@ def _record_offender(cfg: Config, app: ComputeApp, job_id: str | None, action: s
 
 # ---------------------------------------------------------------- exclusive()
 
+def idle_pids(cfg: Config) -> set[int]:
+    """Parked/ready phased kdev workers (service.phase): idle CUDA contexts, not foreign to a lock holder."""
+    if sys.platform == "win32":
+        return set()
+    try:
+        from kdev.service import phase  # noqa: PLC0415
+
+        return phase.idle_pids(cfg.home)
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+def _phase_hold_entry(cfg: Config, job_id: str | None, agent: str) -> Any:
+    """Register this (non-phased) EX holder as a kdev holder, so parked phased workers do not give way."""
+    if sys.platform == "win32":
+        return None
+    try:
+        from kdev.service import phase  # noqa: PLC0415
+
+        e = phase.Entry(cfg.home, job=job_id or "", agent=agent)
+        e.set("holding")
+        return e
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _own_pids() -> set[int]:
     me = os.getpid()
     return {me} | descendants(me)
@@ -376,6 +402,7 @@ def _exclusive_gen(cfg: Config, *, timeout_s: float | None = None, job_id: str |
     lk = _FileLock(cfg.lock_path)
     qinfo: dict[str, Any] = {}
     entry = None
+    hold_entry = None
     try:
         def _stop() -> None:
             if timeout_s is not None and time.monotonic() - t0 > timeout_s:
@@ -397,11 +424,12 @@ def _exclusive_gen(cfg: Config, *, timeout_s: float | None = None, job_id: str |
             lk.acquire_waiting(lambda: (_stop(), waiter.tick()), min(0.2, poll_s))
             waiter.done()
         t_lock = time.monotonic()
+        hold_entry = _phase_hold_entry(cfg, job_id, agent)
         seen: dict[int, ComputeApp] = {}       # logged offenders
         everseen: dict[int, ComputeApp] = {}   # every foreign app that delayed us
         waited = False
         while True:
-            foreign = foreign_apps(apps_fn(), own_fn())
+            foreign = foreign_apps(apps_fn(), own_fn() | idle_pids(cfg))
             if not foreign:
                 break
             waited = True
@@ -432,6 +460,8 @@ def _exclusive_gen(cfg: Config, *, timeout_s: float | None = None, job_id: str |
         yield grant
     finally:
         lk.release()
+        if hold_entry is not None:
+            hold_entry.remove()
         if entry is not None:
             from kdev.service import lockq  # noqa: PLC0415
 
