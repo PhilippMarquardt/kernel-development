@@ -7,7 +7,8 @@ an optional parent (``--reply-to``; replies share the root's ``thread_id``).
 
 Claims: a ``claim`` post names its scope (``--files`` and ``--shapes``; globs like ``bm_*.py`` allowed; file
 refs count too). The scope check and the insert run in one ``BEGIN IMMEDIATE`` transaction, so of two agents
-claiming at the same moment the second always sees the first. Overlap = same problem (or either without a
+claiming at the same moment the second always sees the first. A claim without ``--files``/``--shapes``
+takes the file names in its text (``pp/pp_stk3b.py``) as its scope. Overlap = same problem (or either without a
 problem) and any scope item matching (file basenames, fnmatch in both directions; shapes case-insensitive).
 Overlaps are reported as conflicts (``--exclusive``: refuse to post). A claim stays open until its owner posts
 ``done`` (replying to it, or with an overlapping scope, or - no scope, no reply - every open claim of that
@@ -33,6 +34,7 @@ from kdev.contract import ErrorCode, KdevError
 
 KINDS = ("finding", "claim", "done", "ask", "answer", "warn", "decision")
 DEFAULT_TTL_S = 12 * 3600
+_FILE_TOKEN = re.compile(r"(?<![\w/.-])((?:[\w.*-]+/)*[\w*-][\w.*-]*\.(?:py|cu|cuh|cpp|h|hpp|ptx|sass|toml))(?![\w])")
 _MENTION = re.compile(r"(?<![\w@/.])@([A-Za-z0-9][A-Za-z0-9_.-]*[A-Za-z0-9_]|[A-Za-z0-9])")
 
 
@@ -231,6 +233,8 @@ def post(conn: sqlite3.Connection, *, agent: str, kind: str, body: str, problem:
     to = (to or "").strip()
     to = "" if to.lower() in ("", "all", "*") else to.lstrip("@")
     scope = scope_items(files, shapes, refs) if kind in ("claim", "done") else []
+    if kind == "claim" and not scope:       # no explicit scope: the files named in the text
+        scope = scope_items(_FILE_TOKEN.findall(body), None, [])
     mentions = sorted(set(_MENTION.findall(body)) | ({to} if to else set()))
     now = created_utc or utc_now()
     conflicts: list[tuple[Post, list[str]]] = []
@@ -415,7 +419,8 @@ def search(conn: sqlite3.Connection, query: str, *, problem: str | None = None, 
 _LEGACY = re.compile(r"^- (\d{2})-(\d{2}) (\d{2}):(\d{2}) UTC \[([^\]]+)\] ([A-Za-z]+): ?(.*)$")
 
 
-def import_legacy(conn: sqlite3.Connection, path: str | Path, year: int | None = None) -> tuple[int, int]:
+def import_legacy(conn: sqlite3.Connection, path: str | Path, year: int | None = None,
+                  problem: str | None = None) -> tuple[int, int]:
     """Ingest the interim bash board (``- MM-DD HH:MM UTC [agent] KIND: text`` lines; continuation lines are
     appended to the previous post). Idempotent (same time+agent+kind+body skipped). Returns (added, skipped)."""
     year = year or _dt.datetime.now(_dt.timezone.utc).year
@@ -437,6 +442,6 @@ def import_legacy(conn: sqlite3.Connection, path: str | Path, year: int | None =
         if dup:
             skipped += 1
             continue
-        post(conn, agent=agent, kind=kind, body=body, source=src, created_utc=utc)
+        post(conn, agent=agent, kind=kind, body=body, source=src, created_utc=utc, problem=problem)
         added += 1
     return added, skipped

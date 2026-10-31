@@ -166,6 +166,9 @@ def test_legacy_board_import_idempotent(tmp_path, conn):
     assert ps[0].created_utc == "2026-10-31T16:44:00Z" and ps[0].source == "import:BOARD.md"
     assert ps[1].kind == "claim" and "continued line" in ps[1].body
     assert ps[2].kind == "finding" and ps[2].body.startswith("[note]")
+    assert ps[1].scope == ["file:stk3b.py"]                    # claim scope from the files named in the text
+    _, conf, _ = board.post(conn, agent="own_", kind="claim", body="rewrite of stk/stk3b.py -> own/own.py")
+    assert conf and conf[0][0].agent == "pp_" and conf[0][1] == ["file:stk3b.py"]
 
 
 _WORKER = r"""

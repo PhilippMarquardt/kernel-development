@@ -239,7 +239,7 @@ def cmd_board_release(args: Namespace, ctx: Context) -> Result:
 def cmd_board_import(args: Namespace, ctx: Context) -> Result:
     from kdev.collab import board
     with _conn(ctx) as c:
-        added, skipped = board.import_legacy(c, args.path, year=args.year)
+        added, skipped = board.import_legacy(c, args.path, year=args.year, problem=_problem(ctx))
     return Result(tool="board import", verdict="imported", summary={"added": added, "skipped": skipped},
                   lines=[f"{args.path}: {added} posts added, {skipped} already present"])
 
