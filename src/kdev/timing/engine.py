@@ -872,14 +872,22 @@ def render_lines(tool: str, verdict: str, rows: list[dict[str, Any]], score: dic
         d = score["delta"]
         head += f"  {d['num']}/{d['den']} score x{d['median']:.3f} [{d['ci_lo']:.3f}, {d['ci_hi']:.3f}]"
     lines = [head]
-    lines.append("shape".ljust(34) + "".join(f"{lb[:10]:>11}" for lb in labels) + "   speedup [95% CI]   verdict")
+    # ~judge column: the first non-base label's time x the kdev calib table ratio ('?' = small/uncertain)
+    est_lb = next((lb for lb in labels if lb != BASE_LABEL and any(
+        p.get("label") == lb and p.get("judge_est") for r in rows for p in r.get("per_file") or [])), None)
+    lines.append("shape".ljust(34) + "".join(f"{lb[:10]:>11}" for lb in labels)
+                 + (f"{'~J ' + est_lb[:6]:>11}" if est_lb else "") + "   speedup [95% CI]   verdict")
     for r in rows[:max_rows]:
         us = {p["label"]: p["median_us"] for p in r["per_file"]}
         rt = r.get("ratio") or {}
         sp = (f"x{rt['speedup']:.3f} [{rt['speedup_ci'][0]:.3f}, {rt['speedup_ci'][1]:.3f}]"
               if rt.get("speedup") else "-")
+        est = ""
+        if est_lb:
+            e = next((p.get("judge_est") for p in r["per_file"] if p.get("label") == est_lb), None)
+            est = f"{(_fmt_us(e['judge_est_us']) + ('?' if e['small'] else ' ')) if e else '- ':>11}"
         lines.append(r["shape_id"][:33].ljust(34) + "".join(f"{_fmt_us(us.get(lb)):>11}" for lb in labels)
-                     + f"   {sp:<22} {r.get('verdict', '')}")
+                     + est + f"   {sp:<22} {r.get('verdict', '')}")
     if len(rows) > max_rows:
         lines.append(f"... {len(rows) - max_rows} more rows in table.md")
     # the fidelity line is added by kdev.output.render (Result.fidelity), once
@@ -990,6 +998,18 @@ def _run(spec: JobSpec, run_dir: Any, kind: str) -> Result:
         res.summary["problem"] = prob           # ledger rows need it when --problem was not given
     if score and score.get("delta"):
         res.summary["score_delta"] = score["delta"]
+    try:
+        from kdev.timing import calibtab
+
+        cal = calibtab.annotate(rows, ss.shapes, prob, BASE_LABEL)
+    except Exception as e:  # noqa: BLE001
+        cal = None
+        res.warnings.append(f"calibration table not applied: {type(e).__name__}: {e}")
+    if cal:
+        res.summary["calib_table"] = cal
+        if cal["small_sub_shapes"]:
+            res.warnings.append(f"{cal['small_sub_shapes']} shape(s) < {calibtab.SMALL_US:.0f} us: ~judge us "
+                                f"uncertain (+-{calibtab.SMALL_ABS_US} us judge overhead spread); compare absolute us")
     res.lines = render_lines(kind, verdict, rows, score, fid, labels)
     if any(v is False for v in ss.checks.values()):
         res.status = "fail"

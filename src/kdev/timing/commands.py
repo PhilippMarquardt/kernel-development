@@ -168,6 +168,32 @@ def cmd_calib(args: Namespace, ctx: Context) -> Result:
     return _submit(build_calib_spec(args, ctx), args, ctx)
 
 
+def cmd_calib_table(args: Namespace, ctx: Context) -> Result:
+    from kdev.timing import calibtab
+
+    prob = args.problem_name or getattr(ctx, "problem", None)
+    if not prob:
+        raise KdevError(ErrorCode.INVALID_REQUEST, "which problem?", recovery="kdev calib table PROBLEM (or --problem)")
+    prob = os.path.basename(os.path.normpath(prob))
+    tab = calibtab.load(prob)
+    if args.reset:
+        p = calibtab.path_for(prob)
+        if p.exists():
+            p.unlink()
+        return Result(tool="calib table", verdict="reset", lines=[f"removed {p}"])
+    n = len(tab.get("shapes", {}))
+    if not n:
+        return Result(tool="calib table", verdict="empty", summary={"problem": prob},
+                      lines=[f"no calibration table for {prob}"],
+                      next=[f"kdev calib FILE.py:JUDGE.json --problem {prob}  (okc status JOB --json > JUDGE.json)"])
+    rows = {e.get("shape_id"): {"sub": calibtab.stats_for(e, "sub"), "base": calibtab.stats_for(e, "base")}
+            for e in tab["shapes"].values()}
+    lines = [f"OK  calib table  {prob}: {n} shapes, updated {tab.get('updated_utc')}  (J/L = judge us / local us; "
+             f"~judge us = local x J/L)"] + calibtab.table_lines(tab)
+    return Result(tool="calib table", verdict="ok", summary={"problem": prob, "path": str(calibtab.path_for(prob)),
+                                                            "shapes": rows}, lines=lines)
+
+
 def register(reg: Registry) -> None:
     reg.command("time", "judge-faithful timing of one file vs the baseline", cmd_time,
                 args=[Arg(("file",), "submission file", type="path"),
@@ -179,6 +205,12 @@ def register(reg: Registry) -> None:
                       Arg(("--set",), "LABEL:K=V knob override (repeatable)", action="append", default=None)]
                 + FIDELITY_ARGS,
                 effects=GPU_FX, gpu=True, long_running=True, package=P)
-    reg.command("calib", "judge-vs-local per-shape calibration (FILE:JUDGE.json ...)", cmd_calib,
+    reg.command("calib", "judge-vs-local per-shape calibration (FILE:JUDGE.json ...); updates the calib table",
+                cmd_calib,
                 args=[Arg(("pairs",), "FILE:JUDGE.json (JUDGE '-' = local only)", nargs="+")] + FIDELITY_ARGS,
                 effects=GPU_FX, gpu=True, long_running=True, package=P)
+    reg.command("calib table", "per-shape judge/local ratios (from kdev calib) that time/ab apply as ~judge us",
+                cmd_calib_table,
+                args=[Arg(("problem_name",), "problem name or dir (default --problem)", nargs="?", default=None),
+                      Arg(("--reset",), "delete the table", action="store_true")],
+                effects=Effects(gpu="none", writes=()), package=P)

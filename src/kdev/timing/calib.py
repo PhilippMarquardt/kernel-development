@@ -18,6 +18,7 @@ from kdev.models import JobSpec
 DROP_CASE_KEYS = ("load", "repeats", "weight", "router_load", "router_distinct")
 ID_KEYS = ("layer", "batch", "bs", "m", "q_len", "ctx", "turn", "prefix")
 DEFAULT_BAND = (0.95, 1.05)
+SMALL_US = 6.0          # judge sub us below this: overhead-dominated, L/J flagged '~' (see calibtab)
 
 
 @dataclass
@@ -190,7 +191,7 @@ def render_calib_md(crows: list[dict[str, Any]], labels: list[str], header: str 
             def g(x: Any, p: int = 1) -> str:
                 return "-" if x is None else f"{x:.{p}f}"
 
-            star = " **" if f.get("flag") in ("out_of_band", "DISAGREE") else ""
+            star = (" **" if f.get("flag") in ("out_of_band", "DISAGREE") else "") + (" ~small" if r.get("small") else "")
             lines.append(f"| {r['shape_id']} | {g(f['judge_us'])} | {g(f['local_us'])} | {g(r['judge_base_us'])} | "
                          f"{g(r['local_base_us'])} | {g(f['judge_sp'], 3)} | {g(f['local_sp'], 3)} | "
                          f"{g(f['local_over_judge'], 3)}{star} |")
@@ -274,6 +275,33 @@ def run_calib(spec: JobSpec, run_dir: Any) -> Result:
                          "judge_speedup": jr.speedup if jr else None,
                          "local_score": (score or {}).get("per_file", {}).get(lb),
                          "local_score_ci": (score or {}).get("ci", {}).get(lb)}
+    # small (overhead-dominated) shapes: the judge's per-shape overhead (3.8-4.4 us) vs the constant 4.0 us
+    # alone moves them by up to +-0.4 us, so their L/J is reported but flagged, not trusted
+    for c in crows:
+        jsub = [c["files"][lb].get("judge_us") for lb in labels if c["files"][lb].get("judge_us")]
+        c["small"] = bool(jsub) and min(jsub) < SMALL_US
+    for lb in labels:
+        bl = [c["local_base_us"] / c["judge_base_us"] for c in crows if c.get("local_base_us") and c.get("judge_base_us")]
+        per_label[lb]["median_base_local_over_judge"] = median(bl) if bl else None
+        sl = [c["files"][lb]["local_us"] / c["files"][lb]["judge_us"] for c in crows
+              if c["files"][lb].get("local_us") and c["files"][lb].get("judge_us")]
+        per_label[lb]["median_sub_local_over_judge"] = median(sl) if sl else None
+        per_label[lb]["within_2pct_sub"] = sum(1 for x in sl if abs(x - 1) <= 0.02)
+        per_label[lb]["n_small"] = sum(1 for c in crows if c.get("small"))
+    # calibration table (kdev calib table / applied by time+ab as ~judge us)
+    prob_name = spec.problem or (os.path.basename(os.path.normpath(ss.problem_dir)) if ss.problem_dir else None)
+    tab_info = None
+    if prob_name and ss.error is None:
+        try:
+            from kdev.timing import calibtab
+
+            tab = calibtab.load(prob_name)
+            n_obs = calibtab.add_observations(tab, calibtab.observations_from_calib(
+                crows, labels, ss.shapes, judges, {f.label: f.md5 for f in files}, _rid(run_dir)))
+            tab_info = {"path": str(calibtab.save(tab, prob_name)), "added": n_obs,
+                        "shapes": len(tab.get("shapes", {}))}
+        except Exception as e:  # noqa: BLE001
+            ss.warnings.append(f"calibration table not updated: {type(e).__name__}: {e}")
     verdict = "DISAGREE" if disagree else ("out_of_band" if any(flagged.values()) else "calibrated")
     hdr = (f"# kdev calib {_rid(run_dir)}  ({time.strftime('%Y-%m-%d %H:%M')})\n\n" +
            E.fidelity_line(fid) + "\n")
@@ -288,6 +316,7 @@ def run_calib(spec: JobSpec, run_dir: Any) -> Result:
                  files={"calib": str(mdp), "calib_json": str(cjp), "raw": os.path.join(rd, "raw.jsonl"),
                         "log": os.path.join(rd, "log.txt")})
     res.summary = {"labels": labels, "per_label": per_label, "disagree": disagree, "n_shapes": len(crows),
+                   "calib_table": tab_info,
                    "reps": ss.params.reps, "adapter": ss.adapter_source,
                    "calib_rows": [{"shape_id": c["shape_id"], "label": lb,
                                    "local_speedup": c["files"][lb]["local_sp"],
@@ -301,6 +330,15 @@ def run_calib(spec: JobSpec, run_dir: Any) -> Result:
         f"{lb}: local/judge median {pl['median_local_over_judge']:.3f} range "
         f"[{pl['range'][0]:.3f}, {pl['range'][1]:.3f}] flagged {len(pl['flagged'])}"
         for lb, pl in per_label.items() if pl["median_local_over_judge"])]
+    for lb, pl in per_label.items():
+        if pl.get("median_sub_local_over_judge") and pl.get("median_base_local_over_judge"):
+            lines.append(f"  {lb}: abs us local/judge: sub median {pl['median_sub_local_over_judge']:.3f} "
+                         f"({pl['within_2pct_sub']}/{len(crows)} within 2%), baseline median "
+                         f"{pl['median_base_local_over_judge']:.3f}; {pl['n_small']} small shape(s) < {SMALL_US:.0f} us "
+                         f"marked ~ (overhead-dominated). Compare absolute sub us, not local speedups.")
+    if tab_info:
+        lines.append(f"  calibration table: +{tab_info['added']} obs, {tab_info['shapes']} shapes "
+                     f"({tab_info['path']}); time/ab now show ~judge us; `kdev calib table` to view")
     lines.append("shape".ljust(34) + f"{'base us L/J':>16}" + "".join(f"{lb + ' us L/J':>18}{'L/J x':>8}" for lb in labels))
     for c in crows[:15]:
         s = c["shape_id"][:33].ljust(34) + f"{_f(c['local_base_us'])}/{_f(c['judge_base_us'])}".rjust(16)
@@ -309,6 +347,7 @@ def run_calib(spec: JobSpec, run_dir: Any) -> Result:
             s += f"{_f(f['local_us'])}/{_f(f['judge_us'])}".rjust(18)
             s += (f"{f['local_over_judge']:.3f}" if f["local_over_judge"] else "-").rjust(8)
             s += "*" if f.get("flag") in ("out_of_band", "DISAGREE") else " "
+            s += "~" if c.get("small") else ""
         lines.append(s)
     if len(crows) > 15:
         lines.append(f"... {len(crows) - 15} more rows in calib.md")
