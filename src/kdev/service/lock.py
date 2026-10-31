@@ -353,9 +353,9 @@ def _queue_waiter(cfg: Config, priority: int | None, job_id: str | None, agent: 
 
         entry = lockq.register(cfg, priority=int(priority or 0), job_id=job_id, agent=agent)
     w = _Waiter(cfg, int(priority or 0), entry, progress, qinfo)
-    if sys.platform != "win32":
-        w.scan(report=True)
-        w.t_scan = w.t_report = time.monotonic()
+    # first scan/report ~1 s into the wait: by then our flock waiter thread is queued (counted as a waiter)
+    now = time.monotonic()
+    w.t_scan, w.t_report = now - w.SCAN_S + 1.0, now - w.REPORT_S + 1.0
     return entry, w
 
 

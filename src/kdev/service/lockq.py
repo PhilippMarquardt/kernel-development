@@ -117,9 +117,22 @@ def _start_epoch(pid: int) -> float:
 
 
 def openers(path: str) -> list[int]:
+    """Pids with ``path`` open, this process included (lock._openers skips the caller)."""
     from kdev.service.lock import _openers  # noqa: PLC0415
 
-    return _openers(path)
+    out = set(_openers(path))
+    try:
+        real = os.path.realpath(path)
+        for fd in os.listdir("/proc/self/fd"):
+            try:
+                if os.readlink(f"/proc/self/fd/{fd}") == real:
+                    out.add(os.getpid())
+                    break
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return sorted(out)
 
 
 # ------------------------------------------------------------------------------------------ registry
