@@ -258,13 +258,21 @@ def _build_py(path: str, report: BuildReport, pin: Toolchain, home: str | None, 
         if r["key"] in seen:
             continue
         seen.add(r["key"])
-        recs.append(r)
+        if not (r.get("status") != "ok" and r.get("origin") == "entry"):
+            recs.append(r)                 # a failed default-args guess is not part of the file's manifest
         ext = ExtBuild(name=r["name"], cache_key=r["key"], cache_hit=bool(r.get("cache_hit")),
                        seconds=float(r.get("seconds", 0.0)), so_path=r.get("so_path", ""),
                        log_path=r.get("log_path", ""))
         report.exts.append(ext)
         if r.get("status") != "ok":
-            report.errors.append(f"build_failed: {r['name']}: " + " | ".join(_first_errors(_read(ext.log_path), 5)))
+            first = " | ".join(_first_errors(_read(ext.log_path), 5))
+            if r.get("origin") == "entry":
+                # built by calling a build entry point with its default arguments (a guess): the file's real
+                # prepare may never make this call, so it does not fail the build; discovery finds the real ones
+                report.errors.append(f"warning: default-args entry build failed (not fatal): {r['name']}: "
+                                     f"{first[:200]}")
+            else:
+                report.errors.append(f"build_failed: {r['name']}: {first}")
             continue
         _postprocess(ext, r["dir"], pin, runner, report, refresh=not ext.cache_hit)
     if out.get("import_error") and not recs:

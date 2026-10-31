@@ -334,3 +334,16 @@ def test_cli_build_cu_with_fake_nvcc(tmp_path, monkeypatch):
     except NotImplementedError:
         pytest.skip("ledger (P4) not implemented")
     assert rows["kernels"][0]["regs"] == 40 and rows["builds"][0]["cache_key"] == b["builds"][0]["cache_key"]
+
+
+def test_build_py_default_args_entry_failure_is_not_fatal(tmp_path, fake_torch):
+    # OKC moe best: `_ext(defines=None)` builds MAIN_DEFINES, a variant its prepare never uses (and that does not
+    # compile). A guessed default-args entry must not fail the file or enter its manifest.
+    sub = tmp_path / "sub.py"
+    src = _SUB.replace("{extra}", "").replace("def _module():", "def _ext(defines=None):\n"
+                                              "    return load_inline(name='okc_guess', cpp_sources='', "
+                                              "cuda_sources='BROKEN', functions=['run'])\ndef _module():")
+    sub.write_text(src)
+    rep = comp.build_file(str(sub), home=str(tmp_path / "home"), toolchain=TC, python=sys.executable)
+    assert not [e for e in rep.errors if e.startswith("build_failed")], rep.errors
+    assert any("default-args entry build failed" in e for e in rep.errors)

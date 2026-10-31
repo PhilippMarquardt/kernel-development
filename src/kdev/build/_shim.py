@@ -412,7 +412,7 @@ def install(hook: Hook):
     return hook
 
 
-def _call_entries(mod, entries: list[str], errors: list[str]) -> list[str]:
+def _call_entries(mod, entries: list[str], errors: list[str], hook: "Hook | None" = None) -> list[str]:
     called = []
     names = list(entries)
     for n, obj in vars(mod).items():
@@ -430,12 +430,17 @@ def _call_entries(mod, entries: list[str], errors: list[str]) -> list[str]:
         except (TypeError, ValueError):
             continue
         called.append(n)
+        guess = bool(sig.parameters)        # only defaulted params: we guess the arguments (may be unused)
+        n0 = len(hook.records) if hook is not None else 0
         try:
             fn()
         except ExtBuildFailed as e:
-            errors.append(str(e))
+            errors.append(("guess: " if guess else "") + str(e))
         except Exception as e:  # noqa: BLE001 - kernel launches etc. fail without CUDA; expected
             errors.append(f"entry {n}: {type(e).__name__}: {str(e)[:200]}")
+        if guess and hook is not None:
+            for r in hook.records[n0:]:
+                r["origin"] = "entry"     # default-args call: may be a variant the file never uses
     return called
 
 
@@ -477,7 +482,9 @@ def main(argv: list[str]) -> int:
         out["import_error"] = f"{type(e).__name__}: {e}\n" + traceback.format_exc()[-2000:]
         mod = None
     if mod is not None:
-        out["entries_called"] = _call_entries(mod, list(spec.get("entries") or DEFAULT_ENTRIES), out["errors"])
+        out["entries_called"] = _call_entries(mod, list(spec.get("entries") or DEFAULT_ENTRIES), out["errors"], hook)
+        out["entry_errors"] = [e for e in out["errors"] if e.startswith("guess: ")]
+        out["errors"] = [e for e in out["errors"] if not e.startswith("guess: ")]
     if hook.mode == "build" and spec.get("prepare_pass", os.environ.get("KDEV_CPU_PREPARE") == "1")             and not out["import_error"]:
         # prepare-time / first-call extensions: run load -> prepare -> kernel_fn per shape on the CPU with a
         # faked torch.cuda (no CUDA context), so the hook sees and builds those load_inline calls too
