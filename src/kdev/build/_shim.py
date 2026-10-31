@@ -139,6 +139,9 @@ class Hook:
         self.extra_cuda_flags = list(extra_cuda_flags if extra_cuda_flags is not None else
                                      ["-Xptxas=-v", "-lineinfo"])
         self.records: list[dict] = []
+        # use mode: fall back to an up-to-date torch build in TORCH_EXTENSIONS_DIR (never compiles); off with
+        # KDEV_NO_LEGACY_EXT=1
+        self.legacy_fallback = os.environ.get("KDEV_NO_LEGACY_EXT") != "1"
         self.real: dict = {}
 
     # -- the replacement for load_inline / load ------------------------------------------------------------
@@ -160,6 +163,10 @@ class Hook:
         complete = os.path.isfile(marker) and _so_in(d, name)
         if self.mode == "use":
             if not complete:
+                if not self.allow_jit and self.legacy_fallback and not (self.knobs or self.defines):
+                    mod = self._legacy(kind, args, kwargs, rec)
+                    if mod is not None:
+                        return mod
                 if not self.allow_jit:
                     rec["status"] = "needs_build"
                     self.records.append(rec)
@@ -177,6 +184,47 @@ class Hook:
             self.records.append(rec)
             return _Stub(name)
         return self._build(kind, kw, rec, d, marker, stub=True)
+
+    def _legacy(self, kind: str, args: tuple, kwargs: dict, rec: dict):
+        """Missing from the kdev cache: load torch's own up-to-date build (TORCH_EXTENSIONS_DIR, e.g. one the
+        pod's prebuild scripts made) through the real load_inline, but only if ninja has no work to do, so
+        nothing compiles in the GPU lane. Extensions built at prepare time (with GPU tensors) never reach the
+        CPU-only build lane; this is how they load. Returns None (caller raises NeedsBuild) when a compile
+        would be needed. The .so's toolchain notes are still checked against the pin by the timing engine."""
+        try:
+            from torch.utils import cpp_extension as ce  # noqa: PLC0415 - worker only
+        except Exception:  # noqa: BLE001
+            return None
+        orig = getattr(ce, "_run_ninja_build", None)
+        if orig is None:
+            return None
+        import subprocess  # noqa: PLC0415
+        seen: list[str] = []
+
+        def guarded(build_directory, verbose, error_prefix):
+            seen.append(build_directory)
+            try:
+                out = subprocess.run(["ninja", "-C", build_directory, "-n"], capture_output=True, text=True,
+                                     timeout=60).stdout
+            except Exception as e:  # noqa: BLE001
+                out = str(e)
+            if "no work to do" not in out:
+                raise NeedsBuild(f"extension {rec['name']!r}: not in the kdev cache and the legacy build in "
+                                 f"{build_directory} is not up to date; run `kdev build`")
+            return orig(build_directory, verbose, error_prefix)
+
+        ce._run_ninja_build = guarded
+        try:
+            mod = self.real[kind](*args, **kwargs)
+        except NeedsBuild:
+            return None
+        finally:
+            ce._run_ninja_build = orig
+        rec["status"] = "legacy"
+        rec["dir"] = seen[-1] if seen else ""
+        rec["so_path"] = _so_in(rec["dir"], rec["name"]) if rec["dir"] else ""
+        self.records.append(rec)
+        return mod
 
     def _build(self, kind: str, kw: dict, rec: dict, d: str, marker: str, *, stub: bool):
         os.makedirs(d, exist_ok=True)

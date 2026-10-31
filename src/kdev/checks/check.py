@@ -506,12 +506,27 @@ def _run_check(spec: JobSpec, run_dir: Any) -> Result:
     cold = None
     t0 = time.monotonic()
     if ex.get("cold"):
-        _set_cold_env(run_dir)
-    module = adapter.load(fref.path, fref.label or "A")
+        _set_cold_env(run_dir)          # cold = measure the compile itself (explicitly from an empty cache)
+    else:
+        # PLAN 8.2 / M4: no compile under the GPU lock. Route load_inline to kdev's prebuilt cache (or an
+        # up-to-date TORCH_EXTENSIONS_DIR build); a missing extension is needs_build, not a silent JIT.
+        from kdev.observe import _rt
+        _rt.use_prebuilt(spec, fref)
+    try:
+        module = adapter.load(fref.path, fref.label or "A")
+    except Exception as e:  # noqa: BLE001
+        if type(e).__name__ == "NeedsBuild":
+            raise KdevError(ErrorCode.NEEDS_BUILD, str(e), recovery=f"run `kdev build {fref.path}` first") from e
+        raise
     for k, v in (fref.knobs or {}).items():
         setattr(module, k, v)
     load_s = time.monotonic() - t0
-    state = adapter.prepare(module)
+    try:
+        state = adapter.prepare(module)
+    except Exception as e:  # noqa: BLE001
+        if type(e).__name__ == "NeedsBuild":
+            raise KdevError(ErrorCode.NEEDS_BUILD, str(e), recovery=f"run `kdev build {fref.path}` first") from e
+        raise
     prepare_s = getattr(adapter, "last_prepare_s", None) or 0.0
     if ex.get("cold"):
         import torch

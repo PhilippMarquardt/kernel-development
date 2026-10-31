@@ -132,3 +132,28 @@ def test_lock_waiter_queues_and_abandons(tmp_path):
     assert lk2.held
     lk2.release()
     os.close(fd)
+
+
+def test_hook_legacy_fallback_never_compiles(monkeypatch, tmp_path):
+    from kdev.build import _shim
+
+    monkeypatch.setattr(_shim, "_ACTIVE", [])
+    ce = _fake_torch(monkeypatch)
+    calls = []
+
+    def real_inline(name, *a, **k):          # mimics torch: runs ninja via _run_ninja_build, then imports
+        ce._run_ninja_build(str(tmp_path / name), False, "err")
+        calls.append(name)
+        return f"module:{name}"
+
+    ce.load_inline = real_inline
+    ce._run_ninja_build = lambda d, v, e: None
+    hook = _shim.install(_shim.Hook(mode="use", ext_root=str(tmp_path / "cache"), tc_version="13.0", tc_ptxas="p"))
+    ninja = {"out": "ninja: no work to do."}
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: types.SimpleNamespace(stdout=ninja["out"]))
+    assert ce.load_inline("ext_a", "cpp", cuda_sources="x") == "module:ext_a"
+    assert hook.records[-1]["status"] == "legacy"
+    ninja["out"] = "[1/3] nvcc ..."                    # would compile -> needs_build, real build never runs
+    with pytest.raises(_shim.NeedsBuild):
+        ce.load_inline("ext_b", "cpp", cuda_sources="y")
+    assert calls == ["ext_a"] and hook.records[-1]["status"] == "needs_build"

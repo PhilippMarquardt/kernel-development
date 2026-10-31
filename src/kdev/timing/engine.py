@@ -685,6 +685,12 @@ def _hook_toolchain(ss: Session, final: bool = False) -> None:
         pin = ss.toolchain.get("pin")
         if pin:
             ss.toolchain["match"] = all(v == pin for v in notes)
+    if final and ss.hook is not None:
+        leg = sorted({r.get("name", "?") for r in getattr(ss.hook, "records", []) if r.get("status") == "legacy"})
+        if leg:
+            ss.warnings.append(f"{len(leg)} extension(s) loaded from TORCH_EXTENSIONS_DIR, not the kdev cache "
+                               f"(up to date, nothing compiled; toolchain checked via .so notes): "
+                               + ", ".join(leg)[:160])
     if final and ss.toolchain.get("match") is False:
         ss.warnings.append(f"TOOLCHAIN MISMATCH: so_notes {ss.toolchain.get('so_notes')} nvcc "
                            f"{ss.toolchain.get('nvcc')} != pin {ss.toolchain.get('pin')}")
