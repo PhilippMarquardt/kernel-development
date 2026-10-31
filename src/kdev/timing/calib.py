@@ -312,7 +312,7 @@ def run_calib(spec: JobSpec, run_dir: Any) -> Result:
         lines.append(s)
     if len(crows) > 15:
         lines.append(f"... {len(crows) - 15} more rows in calib.md")
-    lines.append(E.fidelity_line(fid))
+    # the fidelity line is added once by kdev.output.render
     res.lines = lines
     if ss.error is not None:
         res.status, res.error = "error", ss.error
