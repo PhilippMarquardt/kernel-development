@@ -190,7 +190,11 @@ def check_tools(pin: Toolchain, runner: Runner = run) -> list[tuple[str, str, st
             out.append((tool, "FAIL", f"{path}: {e}"))
             continue
         if pin.nvcc_version and v != pin.nvcc_version:
-            out.append((tool, "FAIL", f"{path} is V{v or '?'} != pin V{pin.nvcc_version}"))
+            # nvcc/ptxas make the binary (M3: a different ptxas = different SASS); cuobjdump/nvdisasm only
+            # read it, and a newer disassembler reads older cubins, so their mismatch is a warning.
+            sev = "FAIL" if tool in ("nvcc", "ptxas") else "WARN"
+            out.append((tool, sev, f"{path} is V{v or '?'} != pin V{pin.nvcc_version}"
+                        + ("" if sev == "FAIL" else " (disassembler only: does not affect builds)")))
         else:
             out.append((tool, "PASS", f"{path} V{v or '?'}"))
     return out
