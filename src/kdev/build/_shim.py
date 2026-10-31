@@ -149,9 +149,10 @@ class Hook:
         self.extra_cuda_flags = list(extra_cuda_flags if extra_cuda_flags is not None else
                                      ["-Xptxas=-v", "-lineinfo"])
         self.records: list[dict] = []
-        # use mode: fall back to an up-to-date torch build in TORCH_EXTENSIONS_DIR (never compiles); off with
-        # KDEV_NO_LEGACY_EXT=1
-        self.legacy_fallback = os.environ.get("KDEV_NO_LEGACY_EXT") != "1"
+        # use mode: fall back to an up-to-date torch build in TORCH_EXTENSIONS_DIR (never compiles). Opt-in
+        # (KDEV_LEGACY_EXT=1): torch rewrites the sources of a shared build dir when they differ, which makes
+        # another agent's next load recompile; the content-keyed kdev cache + pending records are the default.
+        self.legacy_fallback = os.environ.get("KDEV_LEGACY_EXT") == "1"
         self.owner = ""          # submission file whose calls this hook currently serves (pending records)
         self.real: dict = {}
 

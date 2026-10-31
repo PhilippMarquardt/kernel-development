@@ -137,6 +137,7 @@ def test_lock_waiter_queues_and_abandons(tmp_path):
 def test_hook_legacy_fallback_never_compiles(monkeypatch, tmp_path):
     from kdev.build import _shim
 
+    monkeypatch.setenv("KDEV_LEGACY_EXT", "1")
     monkeypatch.setattr(_shim, "_ACTIVE", [])
     ce = _fake_torch(monkeypatch)
     calls = []
@@ -163,7 +164,7 @@ def test_pending_prepare_time_extension_roundtrip(monkeypatch, tmp_path):
     from kdev.build import _shim
 
     monkeypatch.setattr(_shim, "_ACTIVE", [])
-    monkeypatch.setenv("KDEV_NO_LEGACY_EXT", "1")
+    monkeypatch.delenv("KDEV_LEGACY_EXT", raising=False)
     _fake_torch(monkeypatch)
     root = str(tmp_path / "cache")
     sub = str(tmp_path / "sub.py")
