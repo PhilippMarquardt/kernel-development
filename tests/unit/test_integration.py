@@ -157,3 +157,26 @@ def test_hook_legacy_fallback_never_compiles(monkeypatch, tmp_path):
     with pytest.raises(_shim.NeedsBuild):
         ce.load_inline("ext_b", "cpp", cuda_sources="y")
     assert calls == ["ext_a"] and hook.records[-1]["status"] == "needs_build"
+
+
+def test_pending_prepare_time_extension_roundtrip(monkeypatch, tmp_path):
+    from kdev.build import _shim
+
+    monkeypatch.setattr(_shim, "_ACTIVE", [])
+    monkeypatch.setenv("KDEV_NO_LEGACY_EXT", "1")
+    _fake_torch(monkeypatch)
+    root = str(tmp_path / "cache")
+    sub = str(tmp_path / "sub.py")
+    use = _shim.Hook(mode="use", ext_root=root, tc_version="13.0", tc_ptxas="p")
+    use.owner = sub
+    with pytest.raises(_shim.NeedsBuild):
+        use._call("load_inline", ("prep_ext", "cpp"), {"cuda_sources": "k", "functions": ["f"]})
+    pend = list((tmp_path / "cache" / "pending").glob("*.json"))
+    assert len(pend) == 1 and json.loads(pend[0].read_text())["kw"]["name"] == "prep_ext"
+
+    built = []
+    b = _shim.Hook(mode="build", ext_root=root, tc_version="13.0", tc_ptxas="p")
+    monkeypatch.setattr(b, "_build", lambda kind, kw, rec, d, marker, stub: built.append((kw["name"], d)))
+    assert b.build_pending(str(tmp_path / "other.py")) == [] and not built      # other owner: untouched
+    keys = b.build_pending(sub)
+    assert built[0][0] == "prep_ext" and len(keys) == 1 and not pend[0].exists()

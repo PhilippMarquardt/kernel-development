@@ -52,6 +52,16 @@ def ext_key(source_bytes: bytes, tc_version: str, tc_ptxas: str, flags: list[str
     return h.hexdigest()[:16]
 
 
+def _jsonable(v) -> bool:
+    if v is None or isinstance(v, (str, int, float, bool)):
+        return True
+    if isinstance(v, (list, tuple)):
+        return all(_jsonable(x) for x in v)
+    if isinstance(v, dict):
+        return all(isinstance(k, str) and _jsonable(x) for k, x in v.items())
+    return False
+
+
 def _as_list(x) -> list:
     if x is None:
         return []
@@ -142,6 +152,7 @@ class Hook:
         # use mode: fall back to an up-to-date torch build in TORCH_EXTENSIONS_DIR (never compiles); off with
         # KDEV_NO_LEGACY_EXT=1
         self.legacy_fallback = os.environ.get("KDEV_NO_LEGACY_EXT") != "1"
+        self.owner = ""          # submission file whose calls this hook currently serves (pending records)
         self.real: dict = {}
 
     # -- the replacement for load_inline / load ------------------------------------------------------------
@@ -170,6 +181,7 @@ class Hook:
                 if not self.allow_jit:
                     rec["status"] = "needs_build"
                     self.records.append(rec)
+                    self._record_pending(kind, kw, key)
                     raise NeedsBuild(f"extension {name!r} (key {key}) has no prebuilt entry in {self.ext_root}; "
                                      f"run `kdev build` first")
                 return self._build(kind, kw, rec, d, marker, stub=False)
@@ -184,6 +196,59 @@ class Hook:
             self.records.append(rec)
             return _Stub(name)
         return self._build(kind, kw, rec, d, marker, stub=True)
+
+    def _record_pending(self, kind: str, kw: dict, key: str) -> None:
+        """Remember a call the GPU worker could not serve (typically an extension built inside prepare(), with
+        GPU tensors, which the CPU-only build lane never reaches) so the next ``kdev build`` of the owning file
+        compiles exactly this call: ``<ext_root>/pending/<key>.json``."""
+        try:
+            d = os.path.join(self.ext_root, "pending")
+            os.makedirs(d, exist_ok=True)
+            safe = {k: v for k, v in kw.items() if _jsonable(v)}
+            doc = {"kind": kind, "kw": safe, "key": key, "knobs": self.knobs, "defines": self.defines,
+                   "tc_version": self.tc_version, "tc_ptxas": self.tc_ptxas, "file": self.owner,
+                   "ts": time.time()}
+            with open(os.path.join(d, key + ".json"), "w", encoding="utf-8") as f:
+                json.dump(doc, f)
+        except Exception:  # noqa: BLE001 - best effort; the NeedsBuild error still names the extension
+            pass
+
+    def build_pending(self, file: str) -> list[str]:
+        """Build mode: compile the pending calls recorded for ``file`` (or with no owner) for this toolchain.
+        Returns the keys built; a built call's pending file is removed."""
+        d = os.path.join(self.ext_root, "pending")
+        done: list[str] = []
+        if not os.path.isdir(d):
+            return done
+        knobs, defines = self.knobs, self.defines
+        for fn in sorted(os.listdir(d)):
+            if not fn.endswith(".json"):
+                continue
+            p = os.path.join(d, fn)
+            try:
+                with open(p, encoding="utf-8") as f:
+                    doc = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if doc.get("tc_version") != self.tc_version or doc.get("tc_ptxas") != self.tc_ptxas:
+                continue
+            owner = doc.get("file") or ""
+            if owner and os.path.abspath(owner) != os.path.abspath(file):
+                continue
+            self.knobs, self.defines = dict(doc.get("knobs") or {}), list(doc.get("defines") or [])
+            try:
+                self._call(doc["kind"], (), dict(doc["kw"]))
+                key = call_key(doc["kind"], doc["kw"], self.tc_version, self.tc_ptxas, self.knobs, self.defines)
+                if key == doc.get("key"):
+                    done.append(key)
+                    os.remove(p)
+            except Exception as e:  # noqa: BLE001
+                self.records.append({"name": doc.get("kw", {}).get("name"), "kind": doc.get("kind"),
+                                     "key": doc.get("key"), "status": "failed", "error": str(e)[:300],
+                                     "cache_hit": False, "seconds": 0.0, "dir": "", "log_path": "", "so_path": ""})
+            finally:
+                self.knobs, self.defines = knobs, defines
+        return done
 
     def _legacy(self, kind: str, args: tuple, kwargs: dict, rec: dict):
         """Missing from the kdev cache: load torch's own up-to-date build (TORCH_EXTENSIONS_DIR, e.g. one the
@@ -308,7 +373,7 @@ _ACTIVE: list = []          # [Hook] once installed in this process
 
 
 _CONFIG_FIELDS = ("mode", "ext_root", "tc_version", "tc_ptxas", "knobs", "defines", "force", "allow_jit",
-                  "extra_cuda_flags")
+                  "extra_cuda_flags", "owner")
 
 
 def active():
@@ -399,6 +464,8 @@ def main(argv: list[str]) -> int:
         mod = None
     if mod is not None:
         out["entries_called"] = _call_entries(mod, list(spec.get("entries") or DEFAULT_ENTRIES), out["errors"])
+    if hook.mode == "build":
+        out["pending_built"] = hook.build_pending(path)
     _write(spec["out"], out, hook)
     return 0
 

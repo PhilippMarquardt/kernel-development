@@ -130,7 +130,30 @@ def file_prebuilt(f: FileRef, toolchain: Toolchain, home: str | None = None) -> 
     for e in man.get("exts", []):
         if not entry_complete(e.get("dir", "")):
             return False, f"cache entry {e.get('key')} of {e.get('name')} incomplete"
+    pend = pending_for(f.path, toolchain, home)
+    if pend:
+        return False, f"{len(pend)} prepare-time extension(s) recorded by a GPU run, not built yet: {pend[0]}"
     return True, "ok"
+
+
+def pending_for(path: str, toolchain: Toolchain, home: str | None = None) -> list[str]:
+    """Names of extension calls a GPU worker recorded as missing for ``path`` (``<ext_root>/pending``; the
+    next ``kdev build`` of the file compiles them)."""
+    d = Path(ext_root(home, toolchain)) / "pending"
+    if not d.is_dir():
+        return []
+    out = []
+    for p in sorted(d.glob("*.json")):
+        try:
+            doc = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if doc.get("tc_version") != tc_version(toolchain) or doc.get("tc_ptxas") != tc_ident(toolchain):
+            continue
+        owner = doc.get("file") or ""
+        if not owner or os.path.abspath(owner) == os.path.abspath(path):
+            out.append(str((doc.get("kw") or {}).get("name") or doc.get("key")))
+    return out
 
 
 def is_prebuilt(spec: JobSpec) -> bool:
@@ -169,6 +192,7 @@ def install_load_inline_hook(f: FileRef | None = None, toolchain: Toolchain | No
                       tc_ptxas=env["KDEV_TC_PTXAS"], knobs=json.loads(env["KDEV_KNOBS"] or "{}"),
                       defines=json.loads(env["KDEV_DEFINES"] or "[]"),
                       allow_jit=allow_jit or env.get("KDEV_ALLOW_JIT") == "1")
+    hook.owner = os.path.abspath(f.path) if f is not None and f.path else ""
     return _shim.install(hook)
 
 
@@ -185,4 +209,5 @@ def select_variant(f: FileRef) -> _shim.Hook | None:
     if hook is not None:
         hook.knobs = dict(f.knobs or {})
         hook.defines = list(f.defines or [])
+        hook.owner = os.path.abspath(f.path) if f.path else ""
     return hook

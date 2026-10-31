@@ -549,6 +549,7 @@ class Session:
         if self.hook is not None and label in self.variants:
             self.hook.knobs = dict(self.variants[label][0])
             self.hook.defines = list(self.variants[label][1])
+            self.hook.owner = next((f.path for f in self.files if f.label == label), "")
     toolchain: dict[str, Any] = field(default_factory=dict)
     seeds_used: dict[str, list[int]] = field(default_factory=dict)
     checks: dict[tuple[str, str], bool | None] = field(default_factory=dict)
