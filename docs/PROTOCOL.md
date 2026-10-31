@@ -1,0 +1,118 @@
+# kdev timing protocol `kdev-tp/1`
+
+Owner: P3 (`src/kdev/timing/`, `src/kdev/worker.py`). Every Result carries `"protocol": "kdev-tp/1"`. A change to
+anything in sections 2-5 bumps the version; the ledger then marks older rows `comparable=0` (DESIGN 6.10).
+
+## 1. What the OKC judge does (measured from its records, not assumed)
+
+Verified on the five judge JSONs in `tests/fixtures/{judge,timing}/` (`tests/unit/test_p3_stats.py` reproduces
+each value to 1e-7):
+
+| quantity | judge record field | formula |
+|---|---|---|
+| fixed replay cost | `replay_overhead.overhead_ns` | `2*one_ns - two_ns`; one/two = 1- and 2-kernel graph replays, measured per shape (3.4-4.4 us, median ~3.9) |
+| per-rep ratio | `ratios[i]` | `(baseline_runs_ns[i] - ovh) / (runs_ns[i] - ovh)` |
+| shape speedup | `paired_ratio` = `speedup` | median over k of `sqrt(r[2k] * r[2k+1])` (two reps at a time, order swapped; `setup.first = baseline`) |
+| shape times | `baseline_ns`, `median_ns` | `baseline_raw_ns - ovh`; sub = `baseline_ns / paired_ratio` |
+| problem speedup | `result.speedup` | geomean over loads of `sum(w*base) / sum(w*sub)` |
+| problem CI | `result.speedup_ci` | bootstrap, widened to at least +-1.5 % |
+| reps | `runs` | 6 to 100 per shape (time-budgeted; MoE `MAX_REPEATS=100`) |
+| gate | `replay_overhead.gate_ns` | ~300 us of GPU work in front of each replay (flush + gate) |
+
+Also from TASK.md: every replay starts from a cold L2 (the judge *reads* a buffer larger than L2), the
+submission and the baseline take turns on the same fresh inputs, and **every repetition gets new inputs**
+(routing changes per rep, which is why MoE/decode need several seeds locally).
+
+## 2. kdev-tp/1 per shape (engine.py)
+
+1. Seeds: `params.seed_list`, else `seeds_for_shape(judge_seed, n)`, n = `--seeds` or the adapter's
+   `input_variance()` (1, or 5 for routing/lengths). Extra seeds rotate `seed + j*0x2545F4914F6CDD1D mod 2^63-1`
+   (identical to calib_seeds.py).
+2. Per seed: `adapter.make_inputs(shape, seed)`; per file the judge capture recipe (`graph.capture_with_output`):
+   eager call + sync, side-stream warm-up, `torch.cuda.CUDAGraph` capture, sync. All files share the inputs.
+3. One warm-up replay of every graph, untimed.
+4. `reps` repetitions **per seed** (total `reps * seeds`). Rep r uses seed `(r // 2) % seeds`, so each
+   order-swapped pair (2j, 2j+1) shares its inputs. In each rep every file is replayed once, order ABBA
+   (`--order rotate`: rep r starts at file r % n). The baseline is label `base` and is loaded, prepared and
+   ordered LAST (calib.py order; `extra.base_first` flips it). Load order is part of the protocol: it moves
+   memory placement, measured at up to 1 us (5 %) on bf16 verify16/pooler with base-first.
+5. Each replay: `flush()` (read: `buf.sum()` over a uint8 buffer, default 256 MB = GPU profile `flush_bytes`;
+   optional `extra.gate_cycles` of `torch.cuda._sleep`), CUDA event, `g.replay()`, event, synchronize.
+6. `us = us_raw - overhead`. Mode `judge` (default) subtracts 4.0 us; `local` subtracts the locally measured
+   `2*one - two` (the judge's method); `none` nothing. empty/one/two-kernel graph costs are measured at the
+   END of every job (and also at the start in `local` mode) and always reported in `fidelity.overhead_us`;
+   measuring them first allocates graph pools ahead of the inputs and shifted a page-gather attention shape.
+7. Guard: after timing, each graph is replayed once and `adapter.check(inputs, out)` runs on its output (a
+   failure makes the shape `incorrect`). Then the materialisation probe: float outputs (not aliasing inputs)
+   are filled with NaN, replayed and checked again; failing only there is a warning (packed outputs such as
+   attention's legitimately fail it).
+
+## 3. Statistics (stats.py, pure Python, seeded)
+
+- Per file and shape: median us, bootstrap 95 % CI (2000 resamples), per-seed medians.
+- Ratio of label X vs the reference: judge pairing (`paired_ratios` with the per-rep first side), median,
+  percentile bootstrap 95 % CI (10 000 resamples, seed = crc32 of shape/labels). Reported as `speedup`
+  (ref/X, >1 = X faster) and as the time ratio `median/ci_lo/ci_hi` (X/ref), plus `abs_delta_us` and
+  `num_judge_us = ref_median / speedup`.
+- Score: `adapter.score(sub_us, base_us)` (load-weighted geomean) with `sub_us = ref_median / pair speedup`,
+  CI by resampling the pairs of every shape (2000 draws). `judge_ci` is the same CI widened to +-1.5 %.
+- Verdict: `faster`/`slower` only if the CI excludes 1 and |delta| >= max(noise floor (default 3 %,
+  `extra.noise_floor`), 2 * SE from the CI); `incorrect` on a failed check; `suspect` when faster than
+  `extra.floors_us[shape]`; else `same`. `ab` decides on absolute A-vs-B times (no baseline unless asked).
+
+## 4. Fidelity record and opt-outs
+
+`fidelity`: toolchain (`nvcc` of CUDA_HOME, `so_notes` = versions found in every mapped extension `.so`,
+`pin` from the problem's toolchain.lock / `extra.toolchain_pin` / `$KDEV_TOOLCHAIN_PIN`, `match`), flush
+`{method, bytes[, gate_cycles]}`, graph, exclusive (`ok|waited|fail|shared|unknown`), waited_s, seeds,
+overhead_us, clocks before/after, optouts. Opt-outs (`flush=write|none`, `eager`, `overhead=local|none`,
+`allow_jit`) are printed in CAPS and make the row `comparable=0`.
+
+Exclusivity: the lock holder may export `KDEV_EXCLUSIVE`/`KDEV_WAITED_S`; otherwise the worker checks that the
+shared lock file (`KDEV_LOCK_PATH`, default `/root/gpu.lock`) is held and that nvidia-smi shows no foreign live
+CUDA context at start, between shapes and at the end. A foreign context -> `exclusive=fail` and error
+`not_exclusive` (result kept).
+
+No compile under the lock: before any submission is imported the worker installs P5's
+`kdev.build.cache.install_load_inline_hook` (mode `use`): `load_inline`/`load` resolve to the prebuilt kdev
+cache for the pinned toolchain and the file's knobs/defines; a missing variant -> `needs_build` (exit 4) unless
+`--allow-jit`. `extra.legacy_ext` (opt-out `legacy_ext`) uses the process's TORCH_EXTENSIONS_DIR instead,
+guarded by `ninja -n` (pending work -> `needs_build`). Other JIT systems (SGLang/Triton caches) are not
+intercepted: prebuild them. `fidelity.toolchain.build_cache` and `.exts` record which path was used.
+
+## 5. Worker process contract
+
+`python -m kdev.worker JOB.json [--run-dir DIR]`: chdir to the run dir; writes `meta.json`, `raw.jsonl` (one
+Sample per line, appended per shape), `log.txt`, `table.md`/`shapes.json` (time/ab), `calib.md`/`calib.json`
+(calib), `result.json`; prints exactly one JSON line (the Result) on stdout; exit status = `Result.exit_code`.
+SIGTERM -> `cancelled`, `timeout_s` -> `timeout`, partial samples kept. When the P7 adapter is not available,
+the engine uses a private direct OKC adapter (`timing/_direct.py`, calib.py semantics); `extra.adapter =
+"direct"` forces it (calib does by default, shapes and seeds from the judge JSON).
+
+## 6. Known differences from the judge (and their size)
+
+- Overhead: constant 4.0 us vs per-shape `2*one-two` (3.4-4.4 us): up to +-0.5 us on the sub time; matters on
+  <10 us shapes (warned). Use `--overhead local` to mimic, at the cost of comparability with calibrated rows.
+- Inputs: judge refills inputs every repetition; kdev uses `seeds` fixed input sets (5 for routing problems).
+- Flush/gate: judge gate ~300 us before each replay; kdev 256 MB read (~65 us). `extra.gate_cycles` adds a gate.
+- Judge state copies (`setup.copies`/`prepare_pad`) are not replicated.
+- Local baseline (SGLang) runs 1-3 us slower than on the judge on short attention/router shapes
+  (all_calib.md): compare absolute submission us, not local speedups, on those shapes.
+
+- Layout sensitivity: attention `decode 1/sliding` (ctx 80000, page 1) baseline reads 19.9-23.0 us depending
+  on allocation history in the process (same shape repeated in one job: 20.8, 23.0, 22.8). Judge: 20.9.
+
+## 7. Calibration evidence (pod H200, 2026-10-31, same env as okc/calibration/all: ext13, read flush, 4.0 us)
+
+`kdev calib` (40 reps, 2 runs) vs calib_all.py (40 reps, 2 runs), interleaved under one gpu_run.sh lock,
+means of the 2 runs; and vs the published `all_calib.md` local columns:
+
+| problem | metric | vs calib.py (same session) | vs all_calib.md |
+|---|---|---|---|
+| bf16 (30 shapes) | sub us | median 0.59 %, max 1.78 % (0.16 us), 30/30 within 2 % | median 0.72 %, 29/30 within 2 % |
+| bf16 | base us | median 0.50 %, 29/30 within 2 % | median 0.37 %, 28/30 within 2 % |
+| bf16 | speedup | median 0.84 %, 29/30 within 2 % | median 0.74 %, 28/30 within 2 % |
+| attention (12) | sub us | median 0.18 %, 11/12 within 2 % (d1 sliding 4.72 vs 4.85 us) | median 0.57 %, 11/12 |
+| attention | base us | median 0.43 %, 11/12 within 2 % (d1 sliding, layout) | median 0.34 %, 11/12 |
+
+Self-noise for reference: calib.py run-to-run sub us median 0.55 % (max 1.7 %), kdev 0.44 %.
