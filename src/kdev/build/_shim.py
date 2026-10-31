@@ -220,16 +220,17 @@ class Hook:
         except Exception:  # noqa: BLE001 - best effort; the NeedsBuild error still names the extension
             pass
 
-    def build_pending(self, file: str) -> list[str]:
-        """Build mode: compile the pending calls recorded for ``file`` (or with no owner) for this toolchain.
+    def build_pending(self, file: str, shard: int = 0, shards: int = 1) -> list[str]:
+        """Build mode: compile the pending calls recorded for ``file`` (or with no owner) for this toolchain
+        (every ``shards``-th one starting at ``shard``: parallel shim processes split the list).
         Returns the keys built; a built call's pending file is removed."""
         d = os.path.join(self.ext_root, "pending")
         done: list[str] = []
         if not os.path.isdir(d):
             return done
         knobs, defines = self.knobs, self.defines
-        for fn in sorted(os.listdir(d)):
-            if not fn.endswith(".json"):
+        for j, fn in enumerate(sorted(x for x in os.listdir(d) if x.endswith(".json"))):
+            if j % max(1, shards) != shard:
                 continue
             p = os.path.join(d, fn)
             try:
@@ -457,6 +458,10 @@ def main(argv: list[str]) -> int:
         _write(spec["out"], out, hook)
         return 3
     path = os.path.abspath(spec["file"])
+    if spec.get("pending_only"):            # one shard of a parallel pending build (see compile._build_py)
+        out["pending_built"] = hook.build_pending(path, int(spec.get("shard", 0)), int(spec.get("shards", 1)))
+        _write(spec["out"], out, hook)
+        return 0
     sys.path.insert(0, os.path.dirname(path))
     os.chdir(os.path.dirname(path))
     os.environ["KDEV_KNOBS"] = json.dumps(spec.get("knobs") or {})
@@ -483,7 +488,7 @@ def main(argv: list[str]) -> int:
                                                budget_s=float(spec.get("prepare_budget_s", 900)))
         except Exception as e:  # noqa: BLE001
             out["prepare_pass"] = {"errors": [f"unavailable: {type(e).__name__}: {e}"], "steps": []}
-    if hook.mode == "build":
+    if hook.mode == "build" and not spec.get("skip_pending"):
         out["pending_built"] = hook.build_pending(path)
     _write(spec["out"], out, hook)
     return 0

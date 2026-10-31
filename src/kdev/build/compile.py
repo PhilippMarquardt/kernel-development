@@ -225,13 +225,25 @@ def _build_py(path: str, report: BuildReport, pin: Toolchain, home: str | None, 
             "tc_ptxas": cache.tc_ident(pin), "knobs": knobs, "defines": defines, "force": force,
             "out": os.path.join(tmp, "out.json"), "cap": [int(x) for x in re.findall(r"\d", _arch(pin))[:2]] or [9, 0]}
     sp = os.path.join(tmp, "spec.json")
-    Path(sp).write_text(json.dumps(spec), encoding="utf-8")
     py = python or pin.python or os.environ.get("KDEV_PYTHON") or sys.executable
     env = build_env(pin, root)
-    p = runner([py, str(Path(_shim.__file__).resolve()), sp], timeout=timeout_s, env=env)
+    shim = str(Path(_shim.__file__).resolve())
+    n_pend = len(cache.pending_for(path, pin, home))
+    shards = min(8, max(1, (os.cpu_count() or 4) // 4), n_pend) if n_pend > 1 else 0
+    if shards:
+        spec["skip_pending"] = True            # built below by `shards` parallel shim processes
+    Path(sp).write_text(json.dumps(spec), encoding="utf-8")
+    p = runner([py, shim, sp], timeout=timeout_s, env=env)
+    pend_outs: list[dict[str, Any]] = []
+    if shards:
+        pend_outs = _parallel_pending(py, shim, spec, tmp, shards, env, runner, timeout_s)
     out: dict[str, Any] = {}
     try:
         out = json.loads(Path(spec["out"]).read_text(encoding="utf-8"))
+        for po in pend_outs:
+            out.setdefault("exts", []).extend(po.get("exts", []))
+            out.setdefault("errors", []).extend(po.get("errors", []))
+            out["pending_built"] = list(out.get("pending_built") or []) + list(po.get("pending_built") or [])
     except (OSError, ValueError):
         report.errors.append(f"build_failed: shim crashed (rc {p.returncode}): "
                              + " | ".join(_first_errors(p.stdout + p.stderr, 6)))
@@ -273,6 +285,26 @@ def _build_py(path: str, report: BuildReport, pin: Toolchain, home: str | None, 
         report.errors.append(f"warning: built {len(out['pending_built'])} pending call(s) recorded by a GPU run")
     report.extra_entries = out.get("entries_called", [])  # type: ignore[attr-defined]
     return recs
+
+
+def _parallel_pending(py: str, shim: str, spec: dict[str, Any], tmp: str, shards: int, env: dict[str, str],
+                      runner: Runner, timeout_s: float) -> list[dict[str, Any]]:
+    """Compile pending (prepare-time) calls in ``shards`` concurrent shim processes (one compile each at a time;
+    a bf16 best records ~30). Returns each shard's out.json."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(i: int) -> dict[str, Any]:
+        s = dict(spec, pending_only=True, shard=i, shards=shards, out=os.path.join(tmp, f"pend{i}.json"))
+        sp = os.path.join(tmp, f"pend{i}_spec.json")
+        Path(sp).write_text(json.dumps(s), encoding="utf-8")
+        runner([py, shim, sp], timeout=timeout_s, env=env)
+        try:
+            return json.loads(Path(s["out"]).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {"errors": [f"pending shard {i} crashed"]}
+
+    with ThreadPoolExecutor(max_workers=shards) as ex:
+        return list(ex.map(one, range(shards)))
 
 
 def build_file(path: str, *, knobs: dict[str, Any] | None = None, defines: list[str] | None = None,

@@ -16,7 +16,7 @@ same lock `/root/gpu_run.sh` uses. They never compile while holding it. Build fi
 |---|---|---|
 | 1 | `kdev doctor --problem DIR` | Checks the GPU, the judge toolchain pin (nvcc/ptxas 13.0.88), the lock and the ledger. Fix every FAIL first. |
 | 2 | `kdev ledger tried FILE` / `kdev idea list --status open` | Shows whether this file, a comment-only copy of it or this knob set was already measured. Claim your idea with `kdev idea claim ID`. |
-| 3 | `kdev build FILE [FILE2]` | Compiles with the pinned toolchain into a hash-keyed cache, without the GPU lock. Reports regs, spills and C751x. Every GPU command needs it (`needs_build` otherwise). |
+| 3 | `kdev build FILE [FILE2]` | Compiles with the pinned toolchain into a hash-keyed cache. Reports regs, spills and C751x. Every GPU command needs it (`needs_build` otherwise). Extensions that are built inside `prepare()` or on the first call are found by short GPU discovery jobs: build, discover, rebuild, until the discovery comes back `complete`. Nothing compiles while the GPU lock is held. If a GPU job reports `needs_build`, run `kdev build` again. |
 | 4 | `kdev check FILE` | Correctness: fresh seeds, extra shapes, eager and graph, repeats. Reports `nondeterministic` (ulp ≤ 1 is fine), `intermittent` or `wrong`. |
 | 5 | `kdev time FILE` | Judge-protocol timing against `baseline.py`: graph replay, 256 MB read flush, 4.0 us overhead, 5 seeds, exclusive GPU. It also runs a dispatch probe in a separate process and reports which kernels actually ran for each shape. |
 | 6 | `kdev calib FILE:JUDGE.json` | Compares local and judge results per shape. On a `DISAGREE`, explain it before you trust local A/B on that problem. |
