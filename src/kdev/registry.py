@@ -66,14 +66,59 @@ class Context:
     home: str | None = None
     problem: str | None = None
     quiet: bool = False
-    config: Any = None   # kdev.config.Config, loaded lazily by P1
+    config: Any = None   # kdev.config.Config, loaded lazily by P1 (use ``ctx.cfg``)
     via: str = "cli"     # cli | mcp
+
+    @property
+    def cfg(self) -> Any:
+        """The loaded :class:`kdev.config.Config` (``--home`` honoured); loaded on first use."""
+        if self.config is None:
+            from kdev.config import load_config
+            self.config = load_config(home=self.home)
+        return self.config
+
+    @property
+    def problem_name(self) -> str | None:
+        """``--problem`` or the config's ``default_problem`` (None if neither)."""
+        return self.problem or (self.cfg.default_problem or None)
 
     def submit(self, spec: Any, *, detach: bool = False, direct: bool = False,
                timeout_s: float | None = None) -> Result:
-        """Route a GPU JobSpec: service if up, else direct (flock) mode. Implemented by P1 using
-        ``kdev.service.client``. See PLAN 2.2."""
-        raise NotImplementedError("Context.submit (P1 + P2)")
+        """Route a GPU JobSpec: service if up, else direct (flock) mode. See PLAN 2.2.
+
+        Fills ``job_id``, ``submitted_utc``, ``agent`` and ``problem`` when empty, then delegates to
+        ``kdev.service.client.submit_and_maybe_wait``. ``KDEV_NO_GPU=1`` + a GPU-lane spec ->
+        ``capability_unavailable`` without touching the service (unit tests)."""
+        from kdev.config import no_gpu
+        from kdev.contract import ErrorCode, KdevError
+        from kdev.models import JobSpec
+        from kdev.util import new_id, utc_now
+
+        if isinstance(spec, dict):
+            spec = JobSpec.from_dict(spec)
+        if not isinstance(spec, JobSpec):
+            raise KdevError(ErrorCode.INVALID_REQUEST, f"submit() needs a JobSpec, got {type(spec).__name__}")
+        spec.job_id = spec.job_id or new_id("j")
+        spec.submitted_utc = spec.submitted_utc or utc_now()
+        spec.agent = spec.agent or self.agent
+        spec.problem = spec.problem or self.problem_name
+        if timeout_s is not None:
+            spec.timeout_s = int(timeout_s)
+        if no_gpu() and spec.resolved_lane() == "gpu":
+            raise KdevError(ErrorCode.CAPABILITY_UNAVAILABLE, f"{spec.kind}: GPU disabled (KDEV_NO_GPU=1)",
+                            details={"job_id": spec.job_id, "kind": spec.kind},
+                            recovery="unset KDEV_NO_GPU and run on the GPU host (or via `kdev remote`)")
+        from kdev.service import client
+        return client.submit_and_maybe_wait(self.cfg, spec, detach=detach, direct=direct, timeout_s=timeout_s)
+
+    def submit_from_args(self, spec: Any, args: Namespace) -> Result:
+        """``submit`` with the standard GPU flags (--detach/--direct/--timeout/--priority/--run-name)."""
+        if getattr(args, "priority", None) is not None and hasattr(spec, "priority"):
+            spec.priority = int(args.priority)
+        if getattr(args, "run_name", None) and hasattr(spec, "run_name") and not spec.run_name:
+            spec.run_name = args.run_name
+        return self.submit(spec, detach=bool(getattr(args, "detach", False)),
+                           direct=bool(getattr(args, "direct", False)), timeout_s=getattr(args, "timeout", None))
 
 
 Handler = Callable[[Namespace, Context], Result]
@@ -140,6 +185,21 @@ class Registry:
             if name in self._cmds:
                 return self._cmds[name], argv[n:]
         return None, argv
+
+    def group(self, prefix: str) -> list[Command]:
+        """Commands under a group word ('job' -> job submit/status/...)."""
+        return [c for c in self._cmds.values() if c.name.startswith(prefix + " ")]
+
+    def suggest(self, words: list[str], n: int = 3) -> list[str]:
+        """Closest command names for an unknown command (difflib)."""
+        import difflib
+
+        names = self.names()
+        guess = " ".join(words[:2])
+        out = difflib.get_close_matches(guess, names, n=n, cutoff=0.5)
+        if not out and words:
+            out = difflib.get_close_matches(words[0], names, n=n, cutoff=0.5)
+        return out
 
 
 def build_registry(modules: tuple[str, ...] = COMMAND_MODULES) -> Registry:

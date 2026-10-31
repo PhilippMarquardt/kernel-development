@@ -16,6 +16,22 @@ def _all_modules():
 
 
 def test_import_all_without_torch_or_mcp(monkeypatch):
+    saved = dict(sys.modules)
+    try:
+        _import_all(monkeypatch)
+    finally:  # restore the exact module table so later tests see one copy of every class
+        monkeypatch.undo()
+        for name in [n for n in sys.modules if n.startswith("kdev") and n not in saved]:
+            del sys.modules[name]
+        sys.modules.update({k: v for k, v in saved.items() if k.startswith("kdev")})
+        for name, mod in saved.items():  # package attributes (kdev.contract etc.) back to the old modules
+            if name.startswith("kdev.") and mod is not None:
+                parent, _, child = name.rpartition(".")
+                if parent in sys.modules:
+                    setattr(sys.modules[parent], child, mod)
+
+
+def _import_all(monkeypatch):
     for blocked in ("torch", "mcp", "numpy"):
         monkeypatch.setitem(sys.modules, blocked, None)  # import -> ImportError
     for name in list(sys.modules):

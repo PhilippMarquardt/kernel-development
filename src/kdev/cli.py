@@ -7,6 +7,7 @@ commands/flags in their own ``commands.py``; this file only changes for global b
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import sys
 import traceback
@@ -43,8 +44,17 @@ def _add_arg(p: argparse.ArgumentParser, a: Arg) -> None:
     p.add_argument(*a.flags, **kw)
 
 
+class _Parser(argparse.ArgumentParser):
+    """argparse that raises invalid_request instead of printing usage + exit 2 (so --json stays one object)."""
+
+    def error(self, message: str):  # type: ignore[override]
+        raise KdevError(ErrorCode.INVALID_REQUEST, f"{self.prog}: {message}",
+                        details={"usage": self.format_usage().strip()},
+                        recovery=f"run `{self.prog} --help` for the flags")
+
+
 def build_parser(cmd: Command) -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog=f"kdev {cmd.name}", description=cmd.help)
+    p = _Parser(prog=f"kdev {cmd.name}", description=cmd.help)
     for a in cmd.args:
         _add_arg(p, a)
     for a in GLOBAL_ARGS + (GPU_ARGS if cmd.gpu else []):
@@ -63,31 +73,81 @@ def top_help(reg: Registry) -> str:
     return "\n".join(lines)
 
 
+def group_help(reg: Registry, prefix: str) -> str:
+    lines = [f"usage: kdev {prefix} <subcommand> [args] [--json]", "", "subcommands:"]
+    lines += [f"  {c.name:18s} {c.help}" for c in reg.group(prefix)]
+    return "\n".join(lines)
+
+
+def _flags_before_dashdash(argv: Sequence[str]) -> list[str]:
+    out = []
+    for a in argv:
+        if a == "--":
+            break
+        out.append(a)
+    return out
+
+
+def make_context(args: argparse.Namespace, via: str = "cli") -> Context:
+    """Context for a parsed command line (config loaded eagerly so config errors surface as Results)."""
+    from kdev.config import load_config
+
+    home = getattr(args, "home", None)
+    cfg = load_config(home=home)
+    problem = getattr(args, "problem", None) or (cfg.default_problem or None)
+    return Context(json=bool(getattr(args, "json", False)),
+                   agent=getattr(args, "agent", None) or os.environ.get("KDEV_AGENT", ""),
+                   home=home, problem=problem, quiet=bool(getattr(args, "quiet", False)), config=cfg, via=via)
+
+
 def run(argv: Sequence[str] | None = None, reg: Registry | None = None) -> Result:
-    """Parse argv and execute; returns the Result (no printing). Used by main() and tests."""
+    """Parse argv and execute; returns the Result (no printing). Used by main() and tests.
+
+    Unknown commands and argparse errors raise ``KdevError(invalid_request)``; everything raised by a
+    handler is converted into an error Result (NotImplementedError -> not_implemented, other exceptions ->
+    internal with the traceback on stderr)."""
     argv = list(sys.argv[1:] if argv is None else argv)
     reg = reg or build_registry()
     cmd, rest = reg.resolve(argv)
     if cmd is None:
+        sub = reg.group(argv[0]) if argv else []
+        if sub:
+            raise KdevError(ErrorCode.INVALID_REQUEST, f"`kdev {argv[0]}` needs a subcommand",
+                            details={"subcommands": [c.name for c in sub]},
+                            recovery=f"use one of: {', '.join(c.name for c in sub)}")
+        hint = reg.suggest(argv)
         raise KdevError(ErrorCode.INVALID_REQUEST, f"unknown command: {' '.join(argv[:2])!r}",
-                        recovery="run `kdev --help` for the command list")
+                        details={"suggestions": hint},
+                        recovery=(f"did you mean: {', '.join(hint)}?" if hint else
+                                  "run `kdev --help` for the command list"))
     args = build_parser(cmd).parse_args(rest)
-    ctx = Context(json=getattr(args, "json", False),
-                  agent=getattr(args, "agent", None) or os.environ.get("KDEV_AGENT", ""),
-                  home=getattr(args, "home", None), problem=getattr(args, "problem", None),
-                  quiet=getattr(args, "quiet", False))
     try:
-        return cmd.handler(args, ctx)
+        ctx = make_context(args)
+        result = cmd.handler(args, ctx)
     except NotImplementedError as e:
-        r = not_implemented(cmd.name, str(e) or cmd.name)
-        return r
+        return not_implemented(cmd.name, str(e) or cmd.name)
     except KdevError as e:
         return Result.from_error(cmd.name, e)
+    except Exception as e:  # noqa: BLE001 - never a bare traceback on stdout
+        traceback.print_exc(file=sys.stderr)
+        return Result.from_error(cmd.name, KdevError(ErrorCode.INTERNAL, f"{type(e).__name__}: {e}",
+                                                     recovery="report the traceback printed on stderr"))
+    if not (hasattr(result, "to_dict") and hasattr(result, "exit_code")):  # duck-typed (module reloads)
+        return Result.from_error(cmd.name, KdevError(
+            ErrorCode.INTERNAL, f"handler for {cmd.name!r} returned {type(result).__name__}, not Result"))
+    return result
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    want_json = "--json" in argv
+    flags = _flags_before_dashdash(argv)
+    want_json = "--json" in flags
+    quiet = "--quiet" in flags
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError):
+            pass
     try:
         reg = build_registry()
         if not argv or argv[0] in ("-h", "--help", "help"):
@@ -96,11 +156,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         if argv[0] in ("--version", "-V"):
             print(__version__)
             return 0
-        result = run(argv, reg)
+        if reg.resolve(argv)[0] is None and reg.group(argv[0]) and (len(argv) == 1 or argv[1] in ("-h", "--help")):
+            print(group_help(reg, argv[0]))
+            return 0
+        # with --json, stdout carries exactly one JSON object: anything a handler prints goes to stderr
+        with contextlib.redirect_stdout(sys.stderr) if want_json else contextlib.nullcontext():
+            result = run(argv, reg)
     except KdevError as e:
         result = Result.from_error(argv[0] if argv else "kdev", e)
-    except SystemExit:
-        raise
+    except SystemExit as e:  # argparse --help
+        return e.code if isinstance(e.code, int) else 0
     except Exception as e:  # noqa: BLE001  - never a bare traceback on stdout
         traceback.print_exc(file=sys.stderr)
         result = Result.from_error(argv[0] if argv else "kdev",
@@ -109,7 +174,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(result.to_json())
     else:
         from kdev.output import render
-        print(render(result))
+        print(render(result, quiet=quiet))
     return result.exit_code
 
 
