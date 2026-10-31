@@ -10,6 +10,43 @@ import pytest
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def _holds_gpu_lock() -> bool:
+    """True if this process inherited the shared GPU flock (gpu_run.sh fd 9 / `kdev lock run`): the lock file
+    is open in our fd table and the flock is held."""
+    path = os.environ.get("KDEV_LOCK_PATH") or "/root/gpu.lock"
+    try:
+        real = os.path.realpath(path)
+        mine = any(os.readlink(f"/proc/self/fd/{fd}") == real for fd in os.listdir("/proc/self/fd"))
+    except OSError:
+        return False
+    if not mine:
+        return False
+    try:
+        import fcntl
+    except ImportError:
+        return False
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False                      # nobody holds it exclusively
+    except OSError:
+        return True
+    finally:
+        os.close(fd)
+
+
+# Never touch the shared GPU from the test suite without the lock (board: pytest on the pod created an
+# unlocked CUDA context while other agents were timing). Unit tests need no GPU: hide every device unless
+# KDEV_GPU_TESTS=1 AND we run under /root/gpu_run.sh or `kdev lock run`.
+if os.environ.get("KDEV_GPU_TESTS") == "1":
+    if not _holds_gpu_lock():
+        pytest.exit("KDEV_GPU_TESTS=1 needs the GPU lock: run `/root/gpu_run.sh 900 python -m pytest ...` or "
+                    "`kdev lock run -- python -m pytest ...`", returncode=3)
+else:
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+
 def pytest_collection_modifyitems(config, items):
     if os.environ.get("KDEV_GPU_TESTS") == "1":
         return
