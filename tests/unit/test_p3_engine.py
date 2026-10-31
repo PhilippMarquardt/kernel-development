@@ -117,7 +117,8 @@ def test_render_lines_and_fidelity_line():
     lines = E.render_lines("time", "faster", rows, score, fid, ["base", "A"])
     assert lines[0].startswith("FASTER  time")
     assert len(lines) <= 40
-    fl = lines[-1]
+    assert not any(x.startswith("fidelity:") for x in lines)     # output.render adds it once
+    fl = E.fidelity_line(fid)
     assert "13.0.88=13.0.88" in fl and "WRITE-FLUSH 256MB" in fl and "optouts=FLUSH=WRITE" in fl
     assert "overhead=-4.00us" in fl
 

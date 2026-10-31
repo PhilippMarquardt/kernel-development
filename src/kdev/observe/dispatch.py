@@ -59,6 +59,7 @@ def base_name(kernel: str) -> str:
     if m:
         return m
     k = re.sub(r"^(void|static|__global__)\s+", "", k)
+    k = k.replace("(anonymous namespace)::", "")     # CUPTI's demangling of kernels in an unnamed namespace
     depth = 0
     cut = len(k)
     for i, ch in enumerate(k):           # strip args at top level

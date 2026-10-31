@@ -103,7 +103,8 @@ class TorchTimer:
     output, replay, adapter.check)."""
 
     def __init__(self, adapter: Any, modules: dict[str, Any], states: dict[str, Any], shape: Any, seed: int,
-                 params: TimingParams, flusher: Any = None, overhead: Overhead | None = None) -> None:
+                 params: TimingParams, flusher: Any = None, overhead: Overhead | None = None,
+                 select: Callable[[str], None] | None = None) -> None:
         from kdev.timing import graph as G
         from kdev.timing.flush import DEFAULT_FLUSH_BYTES, Flusher
 
@@ -120,7 +121,11 @@ class TorchTimer:
         self._outs: dict[str, Any] = {}
         for lb in self._labels:
             mod, st = modules[lb], states.get(lb)
-            fn = (lambda m=mod, s=st: adapter.call(m, s, self.inputs))
+            if select is not None:      # lazy load_inline on first call must resolve to THIS label's variant
+                select(lb)
+            def fn(m: Any = mod, s: Any = st) -> Any:
+                return adapter.call(m, s, self.inputs)
+
             self._fns[lb] = fn
             if params.graph:
                 g, _eager, out = G.capture_with_output(fn)
@@ -535,6 +540,15 @@ class Session:
     foreign_start: list[int] | None = None
     foreign_mid: list[int] = field(default_factory=list)
     foreign_end: list[int] | None = None
+    hook: Any = None                               # P5 load_inline hook (None: legacy ext dir / P5 absent)
+    variants: dict[str, tuple[dict[str, Any], list[str]]] = field(default_factory=dict)  # label -> knobs, defines
+
+    def select(self, label: str) -> None:
+        """Point the build hook at ``label``'s knobs/defines (submissions often load_inline lazily, at the
+        first call inside graph capture, not at import/prepare)."""
+        if self.hook is not None and label in self.variants:
+            self.hook.knobs = dict(self.variants[label][0])
+            self.hook.defines = list(self.variants[label][1])
     toolchain: dict[str, Any] = field(default_factory=dict)
     seeds_used: dict[str, list[int]] = field(default_factory=dict)
     checks: dict[tuple[str, str], bool | None] = field(default_factory=dict)
@@ -565,6 +579,15 @@ def _optouts(params: TimingParams) -> list[str]:
     return o
 
 
+def taint_optouts(tool: str, params: TimingParams) -> list[str]:
+    """P6 profiler-taint guard: torch.profiler leaves CUPTI on (+2-5 us on every later timing in this
+    process). Raises (invalid_request) by default; ``extra.allow_profiled`` returns the opt-out instead."""
+    from kdev.observe.guard import check_clean
+
+    tag = check_clean(tool, refuse=not (params.extra or {}).get("allow_profiled"))
+    return [tag] if tag else []
+
+
 def open_session(spec: JobSpec, run_dir: Any, files: list[_File]) -> Session:
     """Resolve the adapter, select shapes, load + prepare every file under the no-compile guard, allocate
     the flush buffer and measure the replay overhead. GPU (worker only)."""
@@ -577,6 +600,7 @@ def open_session(spec: JobSpec, run_dir: Any, files: list[_File]) -> Session:
     params = TimingParams.from_dict(spec.params or {})
     ss = Session(spec=spec, params=params, run_dir=run_dir, files=files)
     ss.optouts = _optouts(params)
+    ss.optouts += taint_optouts(spec.kind, params)
     if not torch.cuda.is_available():
         raise KdevError(ErrorCode.CAPABILITY_UNAVAILABLE, "no CUDA device in the worker",
                         recovery="run on the GPU pod (kdev remote) or via the service")
@@ -598,14 +622,14 @@ def open_session(spec: JobSpec, run_dir: Any, files: list[_File]) -> Session:
         except Exception:  # noqa: BLE001 - P5 not available: the ninja guard below still refuses compiles
             pass
     ss.foreign_start = _env.foreign_contexts()
-    hook = None if extra.get("legacy_ext") else _install_build_hook(ss, spec)
+    ss.hook = None if extra.get("legacy_ext") else _install_build_hook(ss, spec)
     with _env.no_compile_guard(enabled=not params.allow_jit):
         for f in files:
             t0 = time.time()
-            if hook is not None:     # P5 prebuilt cache: this file's knobs/defines select the variant
-                hook.knobs = dict(f.knobs or {})
-                hook.defines = list(next((r.defines for r in spec.files if os.path.abspath(r.path) == f.path),
-                                         []) or [])
+            ss.variants[f.label] = (dict(f.knobs or {}),
+                                    list(next((r.defines for r in spec.files if os.path.abspath(r.path) == f.path),
+                                              []) or []))
+            ss.select(f.label)       # P5 prebuilt cache: this file's knobs/defines select the variant
             try:
                 mod = ss.adapter.load(f.path, f.label)
                 ss.modules[f.label] = mod
@@ -625,21 +649,7 @@ def open_session(spec: JobSpec, run_dir: Any, files: list[_File]) -> Session:
             ss.prepare_s[f.label] = round(time.time() - t0, 2)
             ss.log(f"prepare {f.label} ({os.path.basename(f.path)}) {ss.prepare_s[f.label]:.1f}s")
     ss.toolchain = _env.toolchain_fidelity(ss.problem_dir, extra)
-    if hook is not None:
-        ss.toolchain["build_cache"] = "kdev"
-        ss.toolchain["exts"] = [{k: r.get(k) for k in ("name", "key", "cache_hit", "status", "so_path")}
-                                for r in getattr(hook, "records", [])][:40]
-        sos = [r.get("so_path") for r in getattr(hook, "records", []) if r.get("so_path")]
-        notes = sorted({v for p in sos for v in _env.so_notes(p)} | set(ss.toolchain.get("so_notes") or []))
-        ss.toolchain["so_notes"] = notes
-        pin = ss.toolchain.get("pin")
-        if pin:
-            ss.toolchain["match"] = all(v == pin for v in notes)
-    else:
-        ss.toolchain["build_cache"] = "legacy:" + os.environ.get("TORCH_EXTENSIONS_DIR", "")
-    if ss.toolchain.get("match") is False:
-        ss.warnings.append(f"TOOLCHAIN MISMATCH: so_notes {ss.toolchain.get('so_notes')} nvcc "
-                           f"{ss.toolchain.get('nvcc')} != pin {ss.toolchain.get('pin')}")
+    _hook_toolchain(ss)
     nbytes = params.flush_bytes or _profile_flush_bytes(ss.adapter) or DEFAULT_FLUSH_BYTES
     ss.flusher = Flusher(params.flush, nbytes, gate_cycles=int(extra.get("gate_cycles", 0) or 0))
     if params.overhead == "local":
@@ -653,6 +663,31 @@ def open_session(spec: JobSpec, run_dir: Any, files: list[_File]) -> Session:
     if params.overhead == "local":
         ss.log(f"overhead: {ss.overhead.to_dict()}")
     return ss
+
+
+def _hook_toolchain(ss: Session, final: bool = False) -> None:
+    """Fold the build hook's records (which extensions loaded, from which cache entry, their .so toolchain
+    notes) into ss.toolchain. Called after prepare and again at the end (``final``): lazy submissions only
+    load their extension at the first call inside graph capture."""
+    from kdev.timing import _env
+
+    if ss.hook is None:
+        ss.toolchain["build_cache"] = "legacy:" + os.environ.get("TORCH_EXTENSIONS_DIR", "")
+    else:
+        recs = list(getattr(ss.hook, "records", []))
+        ss.toolchain["build_cache"] = "kdev"
+        ss.toolchain["exts"] = [{k: r.get(k) for k in ("name", "key", "cache_hit", "status", "so_path")}
+                                for r in recs][:40]
+        ss.toolchain["n_ext_so"] = len({r.get("so_path") for r in recs if r.get("so_path")})
+        sos = [r.get("so_path") for r in recs if r.get("so_path")]
+        notes = sorted({v for p in sos for v in _env.so_notes(p)} | set(ss.toolchain.get("so_notes") or []))
+        ss.toolchain["so_notes"] = notes
+        pin = ss.toolchain.get("pin")
+        if pin:
+            ss.toolchain["match"] = all(v == pin for v in notes)
+    if final and ss.toolchain.get("match") is False:
+        ss.warnings.append(f"TOOLCHAIN MISMATCH: so_notes {ss.toolchain.get('so_notes')} nvcc "
+                           f"{ss.toolchain.get('nvcc')} != pin {ss.toolchain.get('pin')}")
 
 
 def _install_build_hook(ss: Session, spec: JobSpec) -> Any:
@@ -714,7 +749,7 @@ def time_shapes(ss: Session) -> None:
             try:
                 for sd in seeds:
                     timers.append((sd, TorchTimer(ss.adapter, ss.modules, ss.states, sh, sd, ss.params,
-                                                  flusher=ss.flusher, overhead=ss.overhead)))
+                                                  flusher=ss.flusher, overhead=ss.overhead, select=ss.select)))
                 smp = _measure_interleaved(timers, sh.shape_id, ss.params)
                 for sd, t in timers:
                     for lb in t.labels():
@@ -762,6 +797,10 @@ def close_session(ss: Session) -> None:
         ss.overhead_end = None
     ss.clocks_after = _env.gpu_state()
     ss.foreign_end = _env.foreign_contexts()
+    try:
+        _hook_toolchain(ss, final=True)
+    except Exception as e:  # noqa: BLE001
+        ss.warnings.append(f"toolchain record failed: {e}")
     try:
         ss.flusher.release()
     except Exception:  # noqa: BLE001
@@ -836,8 +875,7 @@ def render_lines(tool: str, verdict: str, rows: list[dict[str, Any]], score: dic
                      + f"   {sp:<22} {r.get('verdict', '')}")
     if len(rows) > max_rows:
         lines.append(f"... {len(rows) - max_rows} more rows in table.md")
-    if fid is not None:
-        lines.append(fidelity_line(fid))
+    # the fidelity line is added by kdev.output.render (Result.fidelity), once
     return lines
 
 
@@ -900,6 +938,8 @@ def _run(spec: JobSpec, run_dir: Any, kind: str) -> Result:
         time_shapes(ss)
     finally:
         close_session(ss)
+    disp, disp_warn = _isolated_dispatch(spec, run_dir, kind) if ss.error is None else (None, [])
+    ss.warnings.extend(disp_warn[:5])
     labels = [f.label for f in files]
     ref = BASE_LABEL if kind == "time" and BASE_LABEL in labels else labels[0]
     if kind == "ab":
@@ -928,13 +968,19 @@ def _run(spec: JobSpec, run_dir: Any, kind: str) -> Result:
                  shapes=rows, score=score, fidelity=fid,
                  files={"raw": rp, "table": str(tpath),
                         "log": os.path.join(str(getattr(run_dir, "path", run_dir)), "log.txt")},
-                 warnings=warnings[:20])
+                 warnings=warnings[:20], dispatch=disp or None)
+    dj = os.path.join(str(getattr(run_dir, "path", run_dir)), "dispatch", "dispatch.json")
+    if disp and os.path.isfile(dj):
+        res.files["dispatch"] = dj
     res.summary = {"labels": labels, "ref": ref, "n_shapes": len(rows), "reps": ss.params.reps,
                    "order": ss.params.order, "adapter": ss.adapter_source, "problem_dir": ss.problem_dir,
                    "prepare_s": ss.prepare_s, "elapsed_s": round(time.time() - ss.t0, 1),
                    "verdicts": {v: sum(1 for r in rows if r.get("verdict") == v)
                                 for v in sorted({r.get("verdict", "") for r in rows})},
                    "checks": "fail" if any(v is False for v in ss.checks.values()) else "pass"}
+    prob = spec.problem or (os.path.basename(os.path.normpath(ss.problem_dir)) if ss.problem_dir else None)
+    if prob:
+        res.summary["problem"] = prob           # ledger rows need it when --problem was not given
     if score and score.get("delta"):
         res.summary["score_delta"] = score["delta"]
     res.lines = render_lines(kind, verdict, rows, score, fid, labels)
@@ -950,6 +996,35 @@ def _run(spec: JobSpec, run_dir: Any, kind: str) -> Result:
                                   recovery="re-run under the GPU lock with no other GPU processes")
     write_json(run_dir, "shapes.json", rows)
     return res
+
+
+def _isolated_dispatch(spec: JobSpec, run_dir: Any, kind: str) -> tuple[dict[str, Any] | None, list[str]]:
+    """Result.dispatch for time/ab via P6 ``probe_isolated`` (a child process: the profiler never runs in the
+    timing process). Default on for `time`, off for `ab`; ``extra.dispatch`` = true/false overrides. Runs after
+    all timing, still under the job's GPU lock."""
+    want = ((spec.params or {}).get("extra") or {}).get("dispatch")
+    if want is None:
+        want = kind == "time"
+    if not want:
+        return None, []
+    try:
+        from kdev.observe.dispatch import probe_isolated
+    except Exception as e:  # noqa: BLE001
+        return None, [f"dispatch probe unavailable: {e}"]
+    from dataclasses import replace
+
+    child = replace(spec, kind="dispatch", files=[f for f in spec.files if f.role != "base"][:1])
+    out = os.path.join(str(getattr(run_dir, "path", run_dir)), "dispatch")
+    t0 = time.time()
+    extra = (spec.params or {}).get("extra") or {}
+    disp, warns = probe_isolated(child, out, timeout_s=float(extra.get("dispatch_timeout_s", 300)))
+    try:
+        from kdev.timing._io import log
+
+        log(run_dir, f"dispatch probe (child process) {time.time() - t0:.1f}s, {len(disp)} shapes")
+    except Exception:  # noqa: BLE001
+        pass
+    return disp, warns
 
 
 def _clocks_moved(ss: Session) -> bool:

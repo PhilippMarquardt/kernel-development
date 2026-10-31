@@ -295,6 +295,8 @@ def run_calib(spec: JobSpec, run_dir: Any) -> Result:
                                    "local_over_judge": c["files"][lb]["local_over_judge"],
                                    "flag": c["files"][lb]["flag"], "judge_id": c["files"][lb]["judge_id"]}
                                   for c in crows for lb in labels]}
+    if spec.problem or ss.problem_dir:
+        res.summary["problem"] = spec.problem or os.path.basename(os.path.normpath(ss.problem_dir))
     lines = [f"{verdict.upper()}  calib  " + "  ".join(
         f"{lb}: local/judge median {pl['median_local_over_judge']:.3f} range "
         f"[{pl['range'][0]:.3f}, {pl['range'][1]:.3f}] flagged {len(pl['flagged'])}"
