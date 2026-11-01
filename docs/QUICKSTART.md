@@ -30,11 +30,32 @@ timed section; `kdev build`'s discovery and `kdev check` run SHARED (they never 
 | 9 | `kdev sass FILE --kernel RE --loops` (+ `kdev sass diff A B`) | Hot-loop opcode mix and audits (pdl, spills, serialize, repeat, invariant). You need it for any "at the limit" claim. The pdl audit names the parameter each pre-wait load reads (`p.seq_lens x8 (cuda.cu:2444 ...)`); a read-only input is allowlisted in the source with `// kdev:pdl-allow seq_lens -- why` (or `FILE.pdl-allow`). |
 | 10 | `kdev note "CLAIM" --kind limit --evidence RUN_SASS,RUN_SWEEP` / `kdev idea resolve ID ...` | Writes the result, with its run ids and the exact variant, to the board. |
 
-Supporting commands: `kdev dispatch FILE`, `kdev regs FILE`, `kdev floor --shape S`, `kdev timeline FILE`,
+Supporting commands: `kdev dispatch FILE`, `kdev regs FILE`, `kdev floor --shape S`, `kdev timeline FILE` (below),
 `kdev comply FILE` (must pass before promoting), `kdev sanitize FILE`, `kdev queue status`,
 `kdev job list|wait|logs`, `kdev runs list`, `kdev slim STACK.py OUT.py --trace DISPATCH_RUN` (decode + drop dead
 routes, size/md5, <1,000,000 B; then build/check/ab OUT), `kdev ablate FILE --variant mma=a_nomma.py --set
 epilogue:NO_EP=1 --control a_z0.py --floor d32/o=4.66` (us each component costs per shape: excess budget).
+
+## Phase timelines (`kdev timeline`)
+
+```
+kdev timeline best.py --problem P --shapes d32,v16,v32 --seeds 3 --replays 5 --t0 DBG0     --names DBG6=gathered,DBG2=A_end,DBG3=B_end --roles 0-3=consumer,4=producer
+kdev timeline best.py --diff cand.py --shapes v16          # same, both files, prints B - A
+```
+
+Marks: `// @kdev:mark NAME [cta|thread]` lines in the CUDA strings, `KD_MARK(n)`, `// @kdev:acc NAME
+decl|begin|end|flush` (clock accumulators, e.g. producer free-slot wait vs consumer wait), or the agents' own
+macros: a `#define DBG(k)` / `MWT(code, info)` that stores `gtimer()` into a debug buffer is rewritten to kdev
+marks (names `DBG6`, `MWT30`; `--styles none` keeps them off). A .py copy gets a footer that rewrites every
+`load_inline` CUDA source at build time, so import-time source patches are instrumented too. kdev builds the
+copy and the unmarked original first (no compile under the lock), then one job: per shape and seed fresh
+inputs and a graph, read flush before every replay, marked and unmarked replays interleaved. Output: per mark
+min/med/max/spread over CTAs, per phase the per-CTA sum (mean/max/slowest CTA; loops are summed), CTA start/end
+spread, the slowest CTA's lag and its biggest excess phases, per-role waits, and the mark cost (marked - plain
+replay, ns per mark). Mark cost inflates gaps and tails next to marks: compare like with like (`--diff`).
+Full tables: `kdev show RUN --section text`; JSON `timeline.json`; Perfetto `trace.json`.
+Spin waits: never poll with `ld.global.cg` in an `asm volatile` loop (ptxas hoists the weak load -> endless
+spin, board #179); use `kd_wait_geq(ptr, target)` from marks.cuh (ld.relaxed.gpu + globaltimer-bounded trap).
 
 ## Example session (attention)
 

@@ -228,3 +228,15 @@ Placement: judge-mode processes record `summary.placement[label]` (weights = pre
 outputs per shape: top tensors' `data_ptr % 2 MiB`, `% 64 KiB`, class A = 2 MiB aligned / B = 64 KiB / C);
 `ab` warns `PLACEMENT: ... class differs` when the compared files' processes differ. `--pad-mb N` uses the
 same N MB pad before every prepare (standardized), `--pad-seed S` re-randomizes the 8-32 MB pads.
+
+## 11. Timelines (`kdev timeline`, `kdev.timeline/2`)
+
+Not a timing verdict: a per-CTA account of where one kernel's time goes. Conditions follow the judge where they
+matter for phase lengths: every module is prepared once; per shape and seed fresh inputs (`seeds_for_shape`:
+judge seed first, then the calib_seeds rotation, so MoE routing changes per seed), warm call, CUDA graph;
+`--replays` timed replays after one warm-up round, the instrumented and the unmarked graphs interleaved ABBA,
+256 MB read flush before each replay, mark buffer zeroed before the flush (outside the timed region). Phased lock:
+load/prepare/capture SHARED, replays EXCLUSIVE. Every statistic is computed per replay (min / CTA at n//2 / max
+over CTAs, per-CTA phase sums) and then the median over replays and seeds is reported, as the agents' runners
+did (mw_tl_run.py, mtn_tlrun.py). Mark cost = median marked replay - median unmarked replay of the same file
+and shape; it is a whole-kernel number, the local inflation next to a mark (gap/tail) can be larger.
