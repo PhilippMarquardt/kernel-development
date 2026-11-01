@@ -11,7 +11,7 @@ Job layout (built by ``kdev timeline``): files with role ``sub``/``variant`` are
 and B for --diff / --ab), role ``base`` files are the unmarked originals (labels ``A.plain`` / ``B.plain``).
 ``params.extra``: ``marks`` {id: name} (or ``marks_by`` {label: {id: name}}), ``shape`` (one shape id) or
 ``params.shapes`` (comma filter), ``seeds`` (default 3), ``reps`` (replays, default 5), ``roles`` {wg: role},
-``t0`` (mark name), ``ctas`` (all|sample:N), ``capacity_ctas`` (default 1024), ``names`` overrides.
+``t0`` (mark name), ``seed_list`` (explicit seeds for every shape), ``ctas`` (all|sample:N), ``capacity_ctas`` (default 1024), ``names`` overrides.
 After the warm call of a marked module every extension it owns that exports ``kd_marks_init`` gets the buffer
 (re-checked after each new shape: lazily built extensions are attached too).
 """
@@ -175,7 +175,7 @@ def run_timeline(spec: JobSpec, run_dir: Any) -> Result:
     shapes = _rt.select_shapes(adapter, params, extra.get("shape"))
     if not extra.get("shape") and not params.get("shapes"):
         shapes = shapes[:1]
-    n_seeds = max(1, int(extra.get("seeds") or DEFAULT_SEEDS))
+    n_seeds = len(extra.get("seed_list") or []) or max(1, int(extra.get("seeds") or DEFAULT_SEEDS))
     reps = max(1, int(extra.get("reps") or DEFAULT_REPS))
     roles = {int(k): v for k, v in (extra.get("roles") or {}).items()}
     t0 = extra.get("t0") or None
@@ -188,7 +188,8 @@ def run_timeline(spec: JobSpec, run_dir: Any) -> Result:
                 for m in mods if not m.marked}
     groups: list[tuple[Any, int]] = []
     for sh in shapes:
-        for sd in seeds_for_shape(_rt.seed_for(adapter, sh), n_seeds):
+        sl = [int(x) for x in (extra.get("seed_list") or [])]
+        for sd in (sl or seeds_for_shape(_rt.seed_for(adapter, sh), n_seeds)):
             for m in mods:
                 m.add(sh, int(sd))
             groups.append((sh, int(sd)))

@@ -146,7 +146,8 @@ def cmd_timeline(args: Namespace, ctx: Context) -> Result:
     marks_by = {f.label: {str(k): v for k, v in i.marks.items()} for f, i in
                 zip([f for f in files if f.role != "base"], insts if not args.ab else [inst, inst])}
     extra = {"marks": {str(k): v for k, v in inst.marks.items()}, "marks_by": marks_by, "shape": args.shape,
-             "ctas": ctas, "reps": args.replays or args.reps, "seeds": args.seeds, "names": opts["names"],
+             "ctas": ctas, "reps": args.replays or args.reps, "seeds": args.seeds,
+             "seed_list": [int(x) for x in str(args.seed_list or "").replace(",", " ").split()], "names": opts["names"],
              "roles": opts["roles"], "t0": opts["t0"], "capacity_ctas": args.capacity_ctas,
              "ab": [" ".join(s) for s in args.ab] if args.ab else None, "copies": [i.path for i in insts],
              "sources": srcs, "layout": inst.layout, "families": inst.families, "builds": builds}
@@ -164,6 +165,7 @@ def register(reg: Registry) -> None:
                       Arg(("--diff",), "B.py (or A.py B.py): B - A", type="path", nargs="+", default=None),
                       Arg(("--shape",), "one shape id", default=None),
                       Arg(("--seeds",), "inputs per shape", type="int", default=3),
+                      Arg(("--seed-list",), "explicit seeds, e.g. 9132,9169", default=None, mcp=False),
                       Arg(("--replays",), "replays per seed", type="int", default=None),
                       Arg(("--reps",), "alias of --replays", type="int", default=5, mcp=False),
                       Arg(("--names",), "DBG6=gathered,...", default=None),
