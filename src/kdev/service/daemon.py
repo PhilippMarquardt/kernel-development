@@ -2,7 +2,10 @@
 
 - Build lane: a process pool of ``cfg.build_workers`` running build jobs with CUDA_VISIBLE_DEVICES="" (no
   CUDA context, never under the lock). Implemented by calling ``kdev.build.compile.build_job(spec, run_dir)``.
-- GPU lane: exactly one job at a time. For each job: refuse if ``requires_prebuilt`` and
+- GPU lanes: up to ``gpu_lanes`` jobs at a time (env KDEV_GPU_LANES, default 3). Safe because every worker takes
+  the GPU lock itself: phased jobs prepare under the SHARED lock and time under the EXCLUSIVE one, legacy jobs
+  wait for the exclusive lock (a lane spent waiting costs nothing). With one lane, a long ab blocked every
+  short discover/check job behind it (pod 2026-11-01: 1 running + 6 queued at 18 % GPU). For each job: refuse if ``requires_prebuilt`` and
   ``kdev.build.cache.is_prebuilt(spec)`` is False (needs_build, unless allow_jit); then
   ``lock.exclusive()``; spawn ``<python> -m kdev.worker job.json --run-dir DIR`` with timeout; enforce
   max_hold_s (warn event at 80 %, kill at 100 %); record clocks before/after; mark the result not_exclusive if
@@ -44,6 +47,7 @@ _STOP = threading.Event()
 @dataclass
 class DaemonOptions:
     build_workers: int = 8
+    gpu_lanes: int = int(os.environ.get("KDEV_GPU_LANES", "3") or 3)
     foreground: bool = True
     poll_s: float = 0.5
     python: str = ""          # worker interpreter ("" = cfg.python or sys.executable)
@@ -99,18 +103,18 @@ def serve(cfg: Config, opts: DaemonOptions) -> int:
     workers = build_worker_cap(opts.build_workers)
     conn = queue.connect(cfg)
     builds: dict[str, _jobrun.BuildTask] = {}
-    gpu_thread: threading.Thread | None = None
-    gpu_job: list[str | None] = [None]
+    lanes = max(1, int(opts.gpu_lanes))
+    gpu_threads: dict[str, threading.Thread] = {}
     try:
         n = _recover(cfg, conn)
-        queue.log_event(conn, "serve_start", f"pid {os.getpid()} build_workers={workers} recovered={n}")
+        queue.log_event(conn, "serve_start", f"pid {os.getpid()} build_workers={workers} gpu_lanes={lanes} recovered={n}")
         print(f"kdev serve: pid {os.getpid()} home {cfg.home} build_workers={workers} lock {cfg.lock_path}",
               file=sys.stderr, flush=True)
         last_hb = 0.0
         while True:
             stopping = _stopping(cfg)
             if time.monotonic() - last_hb >= HEARTBEAT_S:
-                queue.heartbeat(conn, gpu_lane_job=gpu_job[0], build_workers=workers)
+                queue.heartbeat(conn, gpu_lane_job=",".join(gpu_threads) or None, build_workers=workers)
                 last_hb = time.monotonic()
             # build lane: reap, then fill free slots
             for job_id, task in list(builds.items()):
@@ -142,25 +146,28 @@ def serve(cfg: Config, opts: DaemonOptions) -> int:
                     traceback.print_exc()
                     queue.finish(conn, spec.job_id, "failed", error_code=ErrorCode.INTERNAL.value)
                     queue.log_event(conn, "error", f"build start: {type(e).__name__}: {e}", spec.job_id)
-            # GPU lane: one at a time, in a thread so heartbeats and builds continue
-            if gpu_thread is not None and not gpu_thread.is_alive():
-                gpu_thread, gpu_job[0] = None, None
-            if gpu_thread is None and not stopping:
+            # GPU lanes: up to `lanes` jobs, each in a thread so heartbeats and builds continue; the worker's
+            # own lock (phased shared/exclusive) serialises the timed sections.
+            for jid, th in list(gpu_threads.items()):
+                if not th.is_alive():
+                    del gpu_threads[jid]
+            while not stopping and len(gpu_threads) < lanes:
                 spec = queue.claim_next(conn, "gpu")
-                if spec is not None:
-                    gpu_job[0] = spec.job_id
-                    gpu_thread = threading.Thread(target=run_gpu_job, args=(cfg, spec.job_id), daemon=True,
-                                                  name=f"gpu-{spec.job_id}")
-                    gpu_thread.start()
-            if stopping and gpu_thread is None and not builds:
+                if spec is None:
+                    break
+                th = threading.Thread(target=run_gpu_job, args=(cfg, spec.job_id), daemon=True,
+                                      name=f"gpu-{spec.job_id}")
+                gpu_threads[spec.job_id] = th
+                th.start()
+            if stopping and not gpu_threads and not builds:
                 break
             time.sleep(opts.poll_s)
     finally:
         for job_id, task in builds.items():
             if task.proc is not None:
                 _kill_tree(task.proc)
-        if gpu_thread is not None:
-            gpu_thread.join(_jobrun.STOP_GRACE_S + 30)
+        for th in gpu_threads.values():
+            th.join(_jobrun.STOP_GRACE_S + 30)
         try:
             queue.log_event(conn, "serve_stop", f"pid {os.getpid()}")
             queue.clear_heartbeat(conn)

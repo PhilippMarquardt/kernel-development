@@ -405,8 +405,9 @@ def test_build_lane_direct_runs_without_cuda(cfg):
 
 # ---------------------------------------------------------------- daemon
 
-def _serve_in_thread(cfg, workers=4):
-    t = threading.Thread(target=daemon.serve, args=(cfg, daemon.DaemonOptions(build_workers=workers, poll_s=0.05)),
+def _serve_in_thread(cfg, workers=4, lanes=3):
+    t = threading.Thread(target=daemon.serve, args=(cfg, daemon.DaemonOptions(build_workers=workers, gpu_lanes=lanes,
+                                                                            poll_s=0.05)),
                          daemon=True)
     t.start()
     for _ in range(200):
@@ -445,7 +446,7 @@ def test_daemon_serial_gpu_lane_and_builds(cfg, no_apps, tmp_path):
 
 
 def test_daemon_cancel_running_and_queued(cfg, no_apps):
-    t = _serve_in_thread(cfg)
+    t = _serve_in_thread(cfg, lanes=1)   # one lane, so the second job stays queued
     try:
         long = client.submit(cfg, spec(params={"argv": [PY, "-c", "import time; time.sleep(60)"]})).job_id
         queued = client.submit(cfg, spec()).job_id
@@ -518,3 +519,23 @@ def test_probe_never_raises(cfg):
     names = {c.name for c in checks}
     assert {"gpu", "gpu lock", "service", "ncu permission"} <= names
     assert all(c.status in ("PASS", "WARN", "FAIL", "SKIP") for c in checks)
+
+
+def test_daemon_runs_gpu_jobs_in_parallel_lanes(cfg, no_apps):
+    """Two GPU jobs run at once with 2 lanes (each worker takes the lock itself)."""
+    t = _serve_in_thread(cfg, lanes=2)
+    try:
+        a = client.submit(cfg, spec(params={"argv": [PY, "-c", "import time; time.sleep(2)"]})).job_id
+        b = client.submit(cfg, spec(params={"argv": [PY, "-c", "import time; time.sleep(2)"]})).job_id
+        both = False
+        for _ in range(200):
+            if queue.get(cfg, a).state == "running" and queue.get(cfg, b).state == "running":
+                both = True
+                break
+            time.sleep(0.05)
+        assert both
+        client.wait(cfg, a, timeout_s=60, poll_s=0.05)
+        client.wait(cfg, b, timeout_s=60, poll_s=0.05)
+    finally:
+        daemon.stop(cfg, timeout_s=1)
+        t.join(30)
