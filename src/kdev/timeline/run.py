@@ -29,6 +29,7 @@ DEFAULT_CAPACITY_CTAS = 1024
 DEFAULT_SEEDS = 3
 DEFAULT_REPS = 5
 _CLAIMED: set[str] = set()
+_OWNER: dict[str, int] = {}          # .so path -> id(_Mod) whose buffer it currently writes to
 
 
 def _names_for(spec: JobSpec, f: Any) -> dict[int, str]:
@@ -75,6 +76,7 @@ class _Mod:
         self.flags = 0
         self.capacity = 0
         self.read_n = 16
+        self.libs: list[tuple[str, Any]] = []
 
     def _attach(self) -> None:
         import torch
@@ -82,6 +84,10 @@ class _Mod:
         all_libs = _rt.marks_libraries()
         owned = {os.path.realpath(p) for p in _rt.extension_paths(self.module)}
         mine = [(p, h) for p, h in all_libs if os.path.realpath(p) in owned and p not in self.inited]
+        shared = [p for p, _ in mine if p in _CLAIMED]
+        if shared:                       # identical source in two files (e.g. the same helper TU): one .so
+            self.notes.append("shares " + ", ".join(os.path.basename(p) for p in shared) + " with another file "
+                              "(identical CUDA source): its buffer is re-pointed before each replay")
         if not mine and not self.inited:
             mine = [(p, h) for p, h in all_libs if p not in _CLAIMED]
         for p, init in mine:
@@ -106,7 +112,9 @@ class _Mod:
             if rc < 0:
                 raise KdevError(ErrorCode.INTERNAL, f"kd_marks_init failed rc={rc} in {p}")
             self.inited.add(p)
+            self.libs.append((p, init))
             _CLAIMED.add(p)
+            _OWNER[p] = id(self)
 
     def add(self, shape: Any, seed: int) -> None:
         import torch
@@ -135,6 +143,10 @@ class _Mod:
         self.inputs[key] = inputs
 
     def reset(self) -> None:
+        for p, init in self.libs:          # a .so shared with another module points at the last one's buffer
+            if _OWNER.get(p) != id(self):
+                init(self.buf.data_ptr(), self.capacity)
+                _OWNER[p] = id(self)
         if self.buf is not None:
             self.buf.zero_()
             self.buf[:16].copy_(self.hdr)

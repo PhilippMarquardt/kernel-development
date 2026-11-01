@@ -96,8 +96,10 @@ struct kd_mark_rec { unsigned long long t_ns; unsigned int clk_lo; unsigned shor
 struct kd_mark_hdr { unsigned int count; unsigned int capacity; unsigned int aux; unsigned int flags; };
 
 #ifndef KD_MARKS_NO_DEFINE
-__constant__ kd_mark_hdr* kd_marks_buf = 0;
-__constant__ unsigned int kd_marks_cap = 0;
+// static (internal linkage): several instrumented extensions live in one process (MAIN/TINY builds of one file,
+// --diff A B); a global host shadow symbol would be interposed and kd_marks_init would set another .so's pointer.
+static __constant__ kd_mark_hdr* kd_marks_buf = 0;
+static __constant__ unsigned int kd_marks_cap = 0;
 
 extern "C" __attribute__((visibility("default"))) int kd_marks_init(void* buf, unsigned int capacity) {
   kd_mark_hdr h;
