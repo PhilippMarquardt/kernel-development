@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
+
+import pytest
 
 from kdev.config import Config
 from kdev.service import lockq
@@ -59,3 +62,34 @@ def test_view_orders_waiters(tmp_path):
     assert [w.pid for w in qv.waiters] == [os.getpid()] and qv.waiters[0].kind == "kdev"
     assert qv.waiters[0].priority == 2 and [h["pid"] for h in qv.holders] == [4242]
     lockq.unregister(e)
+
+
+def test_view_idle_opener_is_not_a_holder(tmp_path):
+    """Regression (2026-10-31 smoke): a parked phased worker keeps the lock fd open after LOCK_UN; it is
+    neither waiting nor holding and must not be listed as a holder (watchdog killed it as 'parked holder')."""
+    cfg = _cfg(tmp_path)
+    held = {111: True, 222: False, 333: None}
+    qv = lockq.view(cfg, opener_fn=lambda p: [111, 222, 333], waiting_fn=lambda p: False,
+                    holds_fn=lambda p: held[p])
+    assert sorted(h["pid"] for h in qv.holders) == [111, 333]     # unknown (None) stays conservative
+
+
+@pytest.mark.skipif(sys.platform == "win32" or not os.path.isdir("/proc/self/fdinfo"), reason="Linux /proc")
+def test_holds_lock_reads_fdinfo(tmp_path):
+    import fcntl
+
+    p = str(tmp_path / "gpu.lock")
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT, 0o666)
+    try:
+        assert lockq.holds_lock(os.getpid(), p) is False
+        fcntl.flock(fd, fcntl.LOCK_SH)
+        assert lockq.holds_lock(os.getpid(), p) is True
+        fcntl.flock(fd, fcntl.LOCK_UN)                              # parked: fd kept, lock dropped
+        assert lockq.holds_lock(os.getpid(), p) is False
+        cfg = _cfg(tmp_path)
+        cfg.lock_path = p
+        qv = lockq.view(cfg, opener_fn=lambda _: [os.getpid()], waiting_fn=lambda _: False)
+        assert qv.holders == []
+    finally:
+        os.close(fd)
+    assert lockq.holds_lock(os.getpid(), p) is None                 # not open at all

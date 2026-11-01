@@ -3,7 +3,7 @@
 The GPU lock stays the plain flock on ``cfg.lock_path`` that /root/gpu_run.sh takes with ``flock 9``
 (exclusive). A phased kdev worker (``time --judge-mode``, every child process of a judge-mode ``ab``):
 
-1. ``prepare()``: takes a prepare *slot* (``$KDEV_HOME/phase/slots/<k>``, N = ``$KDEV_PHASE_SLOTS``, default 6:
+1. ``prepare()``: takes a prepare *slot* (``$KDEV_HOME/phase/slots/<k>``, N = ``$KDEV_PHASE_SLOTS``, default 1 (6 adds RAW noise):
    bounds the number of processes holding prepared GPU state), waits its turn behind EX waiters that queued
    before it (FIFO with gpu_run.sh / non-phased kdev jobs) and behind phased processes that are ready to time
    (writer preference: timed sections run back to back, prepares batch), then takes the flock SHARED. Only
@@ -41,7 +41,7 @@ from kdev.contract import ErrorCode, KdevError
 
 IDLE_STATES = ("parked", "ready")                 # synchronized, no queued GPU work: ignored as foreign contexts
 KDEV_HOLD_STATES = ("preparing", "timing", "holding")
-DEFAULT_SLOTS = 6
+DEFAULT_SLOTS = 1                                 # 6 = concurrent prepares: per-process RAW noise x3 (PROTOCOL 10)
 BAIL_S = 6.0                                      # lock held by a non-kdev process this long -> parked gives up
 HIGH_FD = 900
 REQUEUE_FLAG = "phase_requeue"
@@ -281,6 +281,7 @@ class PhaseFacts:
     foreign_wait_s: float = 0.0
     deferred: int = 0
     exclusive: str = "unknown"
+    whole: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {k: (round(v, 2) if isinstance(v, float) else v) for k, v in self.__dict__.items()}
@@ -292,8 +293,12 @@ class PhasedLock:
     def __init__(self, lock_path: str, home: Any = None, *, job_id: str = "", agent: str = "",
                  go_path: str | None = None, slot_fd: int | None = None, stop: Stop = _noop,
                  foreign_wait_s: float = 600.0, apps_fn: Callable[[], list[Any]] | None = None,
-                 log: Callable[[str], None] | None = None) -> None:
+                 log: Callable[[str], None] | None = None, whole: bool = False) -> None:
         self.lock_path, self.home, self.go_path, self.stop = lock_path, home, go_path, stop
+        # whole: EXCLUSIVE from prepare to exit, FIFO in the kernel queue (the ab parent restarts the head of the
+        # ABBA chain this way after it gave way once: a phased re-prepare can lose to every gpu_run.sh job that
+        # queues during its prepare, 4 restarts / 4 min seen on the pod 2026-11-01)
+        self.whole = bool(whole)
         self.slot_fd = slot_fd
         self.fd: int | None = None
         self.entry = Entry(home, job=job_id, agent=agent)
@@ -313,7 +318,8 @@ class PhasedLock:
         return cls(os.environ.get("KDEV_LOCK_PATH") or "/root/gpu.lock", os.environ.get("KDEV_HOME"),
                    job_id=os.environ.get("KDEV_JOB_ID", ""), agent=os.environ.get("KDEV_AGENT", ""),
                    go_path=os.environ.get("KDEV_PHASE_GO") or None,
-                   slot_fd=int(slot) if slot and slot.isdigit() else None, **kw)
+                   slot_fd=int(slot) if slot and slot.isdigit() else None,
+                   whole=os.environ.get("KDEV_PHASE_WHOLE") == "1", **kw)
 
     # -- 1. prepare (shared)
     def prepare(self) -> None:
@@ -334,7 +340,7 @@ class PhasedLock:
             cfg.lock_path = self.lock_path
         except Exception:  # noqa: BLE001
             cfg = None
-        while True:
+        while not self.whole:
             self.stop()
             try:
                 qv = lockq.view(cfg) if cfg is not None else None
@@ -347,7 +353,9 @@ class PhasedLock:
             time.sleep(1.0)
         Path(self.lock_path).parent.mkdir(parents=True, exist_ok=True)
         self.fd = os.open(self.lock_path, os.O_WRONLY | os.O_CREAT, 0o666)
-        _flock_wait(self.fd, fcntl.LOCK_SH, self.stop)
+        _flock_wait(self.fd, fcntl.LOCK_EX if self.whole else fcntl.LOCK_SH, self.stop)
+        if self.whole:
+            self.fd = _high(self.fd)
         self.entry.set("preparing")
         # descendants (dispatch probe, ...) run inside our lock: they must not queue for it again
         os.environ["KDEV_PHASED"] = "held"
@@ -362,6 +370,8 @@ class PhasedLock:
         import fcntl
 
         self.facts.prepare_s = time.monotonic() - getattr(self, "_t_prep", time.monotonic())
+        if self.whole:                            # EX already; only the head of the chain runs whole
+            return
         self.entry.set("parked")
         if self.fd is not None:
             fcntl.flock(self.fd, fcntl.LOCK_UN)
@@ -395,22 +405,24 @@ class PhasedLock:
         import fcntl
 
         assert self.fd is not None, "prepare() first"
-        self.entry.set("ready")
-        fcntl.flock(self.fd, fcntl.LOCK_UN)            # no-op after park(); drops SH if park() was skipped
         t0 = time.monotonic()
-        give_way = self._give_way_check()        # a non-kdev holder (gpu_run.sh) waits for every context
+        if not self.whole:
+            self.entry.set("ready")
+            fcntl.flock(self.fd, fcntl.LOCK_UN)        # no-op after park(); drops SH if park() was skipped
+            give_way = self._give_way_check()    # a non-kdev holder (gpu_run.sh) waits for every context
 
-        def stop() -> None:
-            self.stop()
-            give_way()
+            def stop() -> None:
+                self.stop()
+                give_way()
 
-        _flock_wait(self.fd, fcntl.LOCK_EX, _every(stop, 1.0))
-        self.fd = _high(self.fd)                  # kept until exit: CUDA teardown stays inside EX
+            _flock_wait(self.fd, fcntl.LOCK_EX, _every(stop, 1.0))
+            self.fd = _high(self.fd)              # kept until exit: CUDA teardown stays inside EX
         self.entry.set("timing")
         self.facts.ex_wait_s = time.monotonic() - t0
         self.facts.exclusive = self._foreign_wait()
         os.environ["KDEV_EXCLUSIVE"] = self.facts.exclusive
         os.environ["KDEV_WAITED_S"] = f"{self.facts.slot_wait_s + self.facts.sh_wait_s + self.facts.ex_wait_s:.1f}"
+        self.facts.whole = self.whole
         self.log("phase: " + " ".join(f"{k}={v}" for k, v in self.facts.to_dict().items()))
         return self.facts
 

@@ -66,7 +66,8 @@ def cmd_build(args: Namespace, ctx: Context) -> Result:
             if not f.endswith(".py") or not reports[i].ok:
                 continue
             rep, rr, w = _discover_loop(f, reports[i], one, knobs, defines, ctx,
-                                        max_rounds=int(getattr(args, "discover_rounds", 6) or 6))
+                                        max_rounds=int(getattr(args, "discover_rounds", 6) or 6),
+                                        timeout_s=getattr(args, "discover_timeout", None))
             reports[i] = rep
             rounds += rr
             disc_warn += w
@@ -96,10 +97,11 @@ def cmd_build(args: Namespace, ctx: Context) -> Result:
 
 
 def _discover_loop(path: str, report: Any, rebuild: Any, knobs: dict[str, Any], defines: list[str], ctx: Context,
-                   *, max_rounds: int = 6) -> tuple[Any, list[dict[str, Any]], list[str]]:
+                   *, max_rounds: int = 6, timeout_s: float | None = None
+                   ) -> tuple[Any, list[dict[str, Any]], list[str]]:
     from kdev.build.discover import discover_loop  # noqa: PLC0415
 
-    return discover_loop(path, report, rebuild, knobs, defines, ctx, max_rounds=max_rounds)
+    return discover_loop(path, report, rebuild, knobs, defines, ctx, max_rounds=max_rounds, timeout_s=timeout_s)
 
 
 def register(reg: Registry) -> None:
@@ -117,7 +119,10 @@ def register(reg: Registry) -> None:
                       Arg(("--clean-pending",), "first drop every pending (GPU-recorded, prepare-time) call "
                           "of FILE(s); discovery records the current ones again (stale records of an edited file "
                           "are dropped automatically)", action="store_true"),
-                      Arg(("--discover-rounds",), "max build+discover rounds", type="int", default=6)],
+                      Arg(("--discover-rounds",), "max build+discover rounds", type="int", default=6),
+                      Arg(("--discover-timeout",), "timeout (s) of one discovery round incl. the lock wait "
+                          "(default $KDEV_DISCOVER_TIMEOUT or 900; the in-job budget is 2/3 of it). Discovery takes "
+                          "the GPU lock SHARED (never exclusive; docs/PROTOCOL.md 10)", type="float", default=None)],
                 effects=Effects(gpu="none", writes=("cache", "run_dir", "ledger")), long_running=True,
                 package=P)
 

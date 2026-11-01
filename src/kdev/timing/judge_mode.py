@@ -7,6 +7,8 @@ time (one process, this module's :func:`time_shapes_judge`):
     submission`` flips it), each prepare preceded by a random 8-32 MB pad (judge ``prepare_pad``, kept alive);
   - per shape: inputs from the judge seed (``--judge-json`` takes the per-case seeds of a judge record),
     a pool of ``fresh`` (8) inputs seed + 7919*j, graphs captured submission first, one warm-up replay each;
+    with N > 1 seeds (``--seeds N``; adapter default 5 for routing/length variance, e.g. MoE) every seed gets
+    its own inputs + graphs (no pool) and rep pair p uses seed p % N (reported: seeds=N, Sample.seed);
   - ``reps`` (60) repetitions; every pair of reps (2k, 2k+1) gets the next pool input copied into the
     captured input tensors; even reps replay the baseline first, odd reps the submission first;
   - every replay: read flush (256 MB) + gate (``torch.cuda._sleep``, 235 us ~ judge gate_ns 300 us incl.
@@ -89,65 +91,85 @@ def time_shapes_judge(ss: Any) -> None:
     g1, g2 = G.capture(kn(1)), G.capture(kn(2))
     try:
         for i, sh in enumerate(ss.shapes):
-            seed = int(E.seeds_for(ss, sh)[0])
-            ss.seeds_used[sh.shape_id] = [seed]
-            d = ss.adapter.make_inputs(sh, seed)
-            dst = E._tensors(d)
-            nbytes = sum(t.numel() * t.element_size() for t in dst)
-            k = min(k_fresh, max(1, POOL_BUDGET_BYTES // max(1, nbytes))) if k_fresh > 1 else 0
+            seeds = [int(x) for x in E.seeds_for(ss, sh)]
+            seed = seeds[0]
+            ss.seeds_used[sh.shape_id] = list(seeds)
+            # one timer per seed (own inputs + graphs: routing-dependent shapes may differ per seed); with one
+            # seed the judge's fresh pool (seed + 7919 j, copied into the captured inputs) varies the data;
+            # with several (--seeds N, adapter default 5 for routing/length variance) rep pair p uses seed
+            # p % N, so every seed sees both orders and the seeds interleave against drift.
+            timers: list[tuple[int, Any]] = []
             pool: list[list[Any]] = []
-            for j in range(k):
-                src = E._tensors(ss.adapter.make_inputs(sh, seed + FRESH_STRIDE * j))
-                if len(src) != len(dst) or any(a.shape != b.shape or a.dtype != b.dtype for a, b in zip(src, dst)):
-                    ss.warnings.append(f"{sh.shape_id}: fresh inputs change shape/dtype; fixed inputs used")
-                    pool = []
-                    break
-                pool.append(src)
-            modules = {lb: ss.modules[lb] for lb in cap_order}
-            t = E.TorchTimer(ss.adapter, modules, ss.states, sh, seed, ss.params, flusher=ss.flusher,
-                             overhead=ss.overhead, select=ss.select, inputs=d)
+            dst: list[Any] = []
+            k = 0
+            one = two = ovh = float("nan")
+            o1: list[float] = []
             try:
-                _record_placement(ss, sh.shape_id, t, cap_order, first=(i == 0))
-                for lb in cap_order:
-                    t.replay_us(lb)
-                rec: list[tuple[str, int, int, float]] = []
-                o1: list[float] = []
+                for sd in seeds:
+                    d = ss.adapter.make_inputs(sh, sd)
+                    if len(seeds) == 1:
+                        dst = E._tensors(d)
+                        nbytes = sum(t.numel() * t.element_size() for t in dst)
+                        k = min(k_fresh, max(1, POOL_BUDGET_BYTES // max(1, nbytes))) if k_fresh > 1 else 0
+                        for j in range(k):
+                            src = E._tensors(ss.adapter.make_inputs(sh, sd + FRESH_STRIDE * j))
+                            if len(src) != len(dst) or any(a.shape != b.shape or a.dtype != b.dtype
+                                                           for a, b in zip(src, dst)):
+                                ss.warnings.append(f"{sh.shape_id}: fresh inputs change shape/dtype; fixed inputs "
+                                                   "used (pass --seeds N to vary the inputs per pair)")
+                                pool = []
+                                break
+                            pool.append(src)
+                    modules = {lb: ss.modules[lb] for lb in cap_order}
+                    timers.append((sd, E.TorchTimer(ss.adapter, modules, ss.states, sh, sd, ss.params,
+                                                    flusher=ss.flusher, overhead=ss.overhead, select=ss.select,
+                                                    inputs=d)))
+                    del d
+                _record_placement(ss, sh.shape_id, timers[0][1], cap_order, first=(i == 0))
+                for _, t in timers:
+                    for lb in cap_order:
+                        t.replay_us(lb)
+                rec: list[tuple[str, int, int, int, float]] = []
                 o2: list[float] = []
+                n_seeds = len(timers)
                 for r in range(reps):
+                    sd, t = timers[(r // 2) % n_seeds]
                     if pool and r % 2 == 0:
                         for a, b in zip(dst, pool[(r // 2) % len(pool)]):
                             a.copy_(b)
                     seq = even if r % 2 == 0 else even[::-1]
                     for pos, lb in enumerate(seq):
-                        rec.append((lb, r, pos, t.replay_us(lb)))
+                        rec.append((lb, sd, r, pos, t.replay_us(lb)))
                     if r % OVH_EVERY == 0:
                         o1.append(G.time_replay(g1, ss.flusher))
                         o2.append(G.time_replay(g2, ss.flusher))
                 one, two = _median(o1), _median(o2)
                 ovh = 2 * one - two
-                smp = [Sample(shape_id=sh.shape_id, label=lb, seed=seed, rep=r, order_pos=pos, us_raw=raw,
-                              us=raw - ovh) for lb, r, pos, raw in rec]
+                smp = [Sample(shape_id=sh.shape_id, label=lb, seed=sd, rep=r, order_pos=pos, us_raw=raw,
+                              us=raw - ovh) for lb, sd, r, pos, raw in rec]
                 if pool:                                       # verify on the judge-seed input
                     for a, b in zip(dst, pool[0]):
                         a.copy_(b)
-                for lb in cap_order:
-                    info = t.verify(lb)
-                    ok = info.get("ok")
-                    prev = ss.checks.get((sh.shape_id, lb))
-                    ss.checks[(sh.shape_id, lb)] = (False if (prev is False or ok is False)
-                                                    else (ok if prev is None else prev))
-                    if ok is False:
-                        ss.check_msgs.append(dict(info, shape_id=sh.shape_id))
+                for _, t in timers:
+                    for lb in cap_order:
+                        info = t.verify(lb)
+                        ok = info.get("ok")
+                        prev = ss.checks.get((sh.shape_id, lb))
+                        ss.checks[(sh.shape_id, lb)] = (False if (prev is False or ok is False)
+                                                        else (ok if prev is None else prev))
+                        if ok is False:
+                            ss.check_msgs.append(dict(info, shape_id=sh.shape_id))
             finally:
-                t.close()
-                del t, pool, dst, d
+                for _, t in timers:
+                    t.close()
+                del timers, pool, dst
                 torch.cuda.empty_cache()
             ss.shape_overhead[sh.shape_id] = {"one_us": one, "two_us": two, "overhead_us": ovh,
-                                              "n": len(o1), "fresh": k}
+                                              "n": len(o1), "fresh": k, "seeds": len(seeds)}
             ss.samples.extend(smp)
             append_jsonl(ss.run_dir, "raw.jsonl", [s.to_dict() for s in smp])
             raw = {lb: _median([s.us_raw for s in smp if s.label == lb]) for lb in cap_order}
-            ss.log(f"[{i + 1}/{len(ss.shapes)}] {sh.shape_id} ovh {ovh:.2f} (one {one:.2f}) raw "
+            ss.log(f"[{i + 1}/{len(ss.shapes)}] {sh.shape_id} seeds={len(seeds)} ovh {ovh:.2f} (one {one:.2f}) raw "
                    + " ".join(f"{lb}={v:.2f}" for lb, v in raw.items()))
     except KdevError as e:
         ss.error = e.info()
@@ -318,13 +340,17 @@ def _phased_children(spec: JobSpec, seq: list[str], by_label: dict[str, FileRef]
         if i == st["head"]:
             open(go, "w").close()
         env = dict(os.environ, KDEV_PHASED="1", KDEV_PHASE_GO=go, KDEV_PHASE_SLOT_FD=str(slots[i]))
+        # the head gave way before: restart it EXCLUSIVE for its whole life (FIFO with gpu_run.sh), so a busy
+        # queue cannot make it re-prepare forever; a non-head never may (it would hold EX waiting for its go)
+        env["KDEV_PHASE_WHOLE"] = "1" if attempts[i] >= 1 and i == st["head"] else "0"
         with open(os.path.join(d, "stdout.txt"), "w", encoding="utf-8") as out, \
                 open(os.path.join(d, "stderr.txt"), "w", encoding="utf-8") as err:
             p = subprocess.Popen([python or sys.executable, "-m", "kdev.worker", jp, "--run-dir", d], stdout=out,
                                  stderr=err, env=env, pass_fds=(slots[i],), stdin=subprocess.DEVNULL)
         procs[i] = (p, d)
         log(f"process {i + 1}/{n}: {lb} ({os.path.basename(by_label[lb].path)}) started (phased"
-            + (f", attempt {attempts[i] + 1}" if attempts[i] else "") + ")")
+            + (f", attempt {attempts[i] + 1}" if attempts[i] else "")
+            + (", exclusive for its whole life" if env["KDEV_PHASE_WHOLE"] == "1" else "") + ")")
 
     def result_of(d: str, rc: int | None) -> dict[str, Any]:
         try:

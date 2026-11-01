@@ -235,7 +235,8 @@ def _prebuilt_gate(spec: JobSpec) -> KdevError | None:
     if not ok:
         return KdevError(ErrorCode.NEEDS_BUILD, "no prebuilt cache hit for "
                          + ", ".join(f.path for f in spec.files), recovery="run `kdev build " +
-                         " ".join(f.path for f in spec.files) + "` first (builds never take the GPU lock)")
+                         " ".join(f.path for f in spec.files) + "` first (compiles never take the GPU lock; its short "
+                         "discovery pass takes it SHARED, --no-discover skips it)")
     return None
 
 

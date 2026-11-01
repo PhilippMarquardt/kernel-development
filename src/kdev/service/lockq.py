@@ -135,6 +135,32 @@ def openers(path: str) -> list[int]:
     return sorted(out)
 
 
+def holds_lock(pid: int, path: str) -> bool | None:
+    """Does ``pid`` hold an flock on ``path``? /proc/<pid>/fdinfo/<fd> lists the granted locks of that open
+    file description ("lock:" lines; blocked requests are not listed). True/False, or None when unknown
+    (fd dir unreadable). An opener without a lock line is idle: a parked phased worker keeps its lock fd
+    open after LOCK_UN, so "opener and not waiting" alone is NOT a holder (watchdog false kill, 2026-10-31)."""
+    try:
+        real = os.path.realpath(path)
+        fds = os.listdir(f"/proc/{pid}/fd")
+    except OSError:
+        return None
+    seen = False
+    for fd in fds:
+        try:
+            if os.readlink(f"/proc/{pid}/fd/{fd}") != real:
+                continue
+        except OSError:
+            continue
+        seen = True
+        info = _read(f"/proc/{pid}/fdinfo/{fd}")
+        if not info:
+            return None
+        if any(ln.startswith("lock:") and "->" not in ln for ln in info.splitlines()):
+            return True
+    return False if seen else None
+
+
 # ------------------------------------------------------------------------------------------ registry
 def _qdir(cfg: Config) -> Path:
     return Path(cfg.home) / "lockq"
@@ -257,7 +283,8 @@ def median_hold(cfg: Config, window_s: float = 3 * 3600) -> tuple[float, int]:
 
 # ------------------------------------------------------------------------------------------ view
 def view(cfg: Config, *, opener_fn: Callable[[str], list[int]] | None = None,
-         waiting_fn: Callable[[int], bool] | None = None) -> QueueView:
+         waiting_fn: Callable[[int], bool] | None = None,
+         holds_fn: Callable[[int], bool | None] | None = None) -> QueueView:
     """Holders and waiters of the GPU lock (POSIX /proc; empty elsewhere)."""
     qv = QueueView()
     qv.median_hold_s, qv.n_holds = median_hold(cfg)
@@ -265,8 +292,11 @@ def view(cfg: Config, *, opener_fn: Callable[[str], list[int]] | None = None,
         return qv
     ops = (opener_fn or openers)(cfg.lock_path)
     wfn = waiting_fn or _waiting
+    hfn = holds_fn or (lambda p: holds_lock(p, cfg.lock_path))
     reg = {int(d["pid"]): d for d in registered(cfg)}
     waiting = {p for p in ops if wfn(p)}
+    # openers that are neither waiting nor holding (fd open, no granted flock): idle, e.g. parked phased workers
+    idle = {p for p in ops if p not in waiting and hfn(p) is False}
     parents = {_ppid(p): p for p in waiting}
     for p in sorted(waiting):
         owner = _ppid(p) if _ppid(p) in ops and _ppid(p) not in waiting else p
@@ -278,10 +308,10 @@ def view(cfg: Config, *, opener_fn: Callable[[str], list[int]] | None = None,
                                  priority=int((r or {}).get("priority", 0)), agent=str((r or {}).get("agent", ""))))
     qv.waiters.sort(key=lambda w: (w.started, w.pid))
     for p in ops:
-        if p in waiting or p in parents:
+        if p in waiting or p in parents or p in idle:
             continue
         # holder tree: report the topmost opener (its children inherit fd 9)
-        if _ppid(p) in ops and _ppid(p) not in waiting:
+        if _ppid(p) in ops and _ppid(p) not in waiting and _ppid(p) not in idle:
             continue
         qv.holders.append({"pid": p, "cmdline": _cmdline(p), "since": round(_start_epoch(p), 1)})
     return qv

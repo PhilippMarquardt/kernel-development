@@ -191,3 +191,82 @@ def test_render_lines_fast_three_files():
              "verdict": "faster"}]
     lines = render_lines("ab", "faster", rows, None, None, ["A", "B", "C"])
     assert "B x1.100+ C x0.900-" in lines[-1]
+
+
+# ------------------------------------------------------------------ routing seeds (decode agent bug, 2026-11-01)
+class _FakeTimer:
+    made: list[int] = []
+
+    def __init__(self, adapter, modules, states, shape, seed, params, **kw):
+        self.seed = seed
+        self._outs = {}
+        _FakeTimer.made.append(seed)
+
+    def replay_us(self, lb):
+        return 10.0 + (self.seed % 7) * 0.01
+
+    def verify(self, lb):
+        return {"ok": True}
+
+    def close(self):
+        pass
+
+
+class _FakeAdapter:
+    def __init__(self, routing):
+        self.routing = routing
+
+    def input_variance(self):
+        return {"routing": self.routing}
+
+    def judge_seed(self, shape):
+        return 401
+
+    def make_inputs(self, shape, seed):
+        return {"seed": seed}
+
+
+def _judge_session(tmp_path, monkeypatch, *, seeds, routing):
+    import sys
+    import types
+    from types import SimpleNamespace as NS
+
+    from kdev.timing import engine as E
+    from kdev.timing import graph as G
+    from kdev.timing.engine import Session
+
+    fake_torch = types.ModuleType("torch")
+    fake_torch.zeros = lambda *a, **k: NS(add_=lambda x: None)
+    fake_torch.cuda = NS(empty_cache=lambda: None)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(G, "capture", lambda fn: object())
+    monkeypatch.setattr(G, "time_replay", lambda g, fl: 2.0)
+    monkeypatch.setattr(E, "TorchTimer", _FakeTimer)
+    monkeypatch.setattr(E, "_tensors", lambda d: [])
+    monkeypatch.setattr(JM, "_record_placement", lambda *a, **k: None)
+    _FakeTimer.made = []
+    params = E.TimingParams(reps=20, seeds=seeds, extra={"judge_mode": True})
+    ss = Session(spec=None, params=params, run_dir=str(tmp_path), files=[NS(label="A"), NS(label="base")],
+                 adapter=_FakeAdapter(routing), modules={"A": None, "base": None})
+    ss.shapes = [NS(shape_id="m1", seed=None)]
+    ss.seeds_used, ss.samples, ss.checks, ss.check_msgs = {}, [], {}, []
+    ss.log = lambda m: None
+    ss.error = None
+    return ss
+
+
+@pytest.mark.parametrize("seeds,routing,n", [(5, False, 5), (None, True, 5), (None, False, 1), (1, True, 1)])
+def test_judge_mode_honours_seeds(tmp_path, monkeypatch, seeds, routing, n):
+    ss = _judge_session(tmp_path, monkeypatch, seeds=seeds, routing=routing)
+    JM.time_shapes_judge(ss)
+    assert ss.error is None
+    used = ss.seeds_used["m1"]
+    assert len(used) == n == len(set(used)) and used[0] == 401
+    assert sorted(set(_FakeTimer.made)) == sorted(used)
+    by_seed = {}
+    for s in ss.samples:
+        by_seed.setdefault(s.seed, set()).add((s.label, s.order_pos))
+    assert set(by_seed) == set(used)                                   # every seed actually timed
+    for v in by_seed.values():                                         # ... in both orders (ABBA within a seed)
+        assert v == {("A", 0), ("A", 1), ("base", 0), ("base", 1)}
+    assert ss.shape_overhead["m1"]["seeds"] == n

@@ -204,13 +204,25 @@ pid + start-time checked). All foreign-context checks (kdev lock, worker start/m
 ignore exactly those pids. gpu_run.sh still waits for every context, so a parked worker gives way: if the
 lock is held >= 6 s with no kdev holder registered, it exits and is restarted (fresh prepare).
 
-Fairness: a preparer takes one of `$KDEV_PHASE_SLOTS` (6) prepare slots (bounds parked GPU memory; an `ab`
+Fairness: a preparer takes one of `$KDEV_PHASE_SLOTS` (1 since 2026-11-01; 6 = concurrent prepares, see Fidelity status) prepare slots (bounds parked GPU memory; an `ab`
 parent also needs `KDEV_PHASE_MIN_FREE_MIB` = 30000 free before starting a non-head child), then defers while
 an EX waiter that queued before it exists (FIFO with gpu_run.sh / exclusive kdev jobs) or a phased process
 is ready to time (writer preference: timed sections run back to back, prepares batch). `ab` judge mode starts
 its ABBA children as slots allow; they prepare concurrently and time strictly in A B B A order (go token =
 previous process exited). Opt out: `--no-phased`, `KDEV_PHASED=0`. Results carry `summary.phase`
 {slot_wait_s, sh_wait_s, prepare_s, parked_s, ex_wait_s, foreign_wait_s, deferred, exclusive}.
+
+Requeue: a head of the ABBA chain that gave way once restarts *whole* (`KDEV_PHASE_WHOLE=1`: EXCLUSIVE from
+prepare to exit, FIFO in the kernel queue), so gpu_run.sh jobs queueing during each re-prepare cannot starve
+it (pod 2026-11-01: 4 restarts in 4 min). Queue view (`lockq.view`): a holder is an opener whose
+`/proc/<pid>/fdinfo/<fd>` lists a granted flock; a parked worker keeps its fd open after LOCK_UN and is NOT a
+holder (the 2026-10-31 watchdog kill was this false positive).
+
+Fidelity status (pod 2026-11-01, d1/o, mrg/m1 vs m2, raw per process): old exclusive mode and phased with
+`KDEV_PHASE_SLOTS=1` give per-process RAW 8.99-9.09 us, dRAW -0.05..0.0; phased with 6 slots (concurrent
+prepares) gives 8.99-9.25 us, dRAW -0.14..+0.07, including a process that timed with no other context alive
+(suspect: interleaved physical placement of concurrently prepared processes). Default is therefore 1 slot:
+prepares no longer overlap each other, only the EXCLUSIVE hold shrinks (~11 s -> 1-3 s per process).
 
 Placement: judge-mode processes record `summary.placement[label]` (weights = prepare state + module globals,
 outputs per shape: top tensors' `data_ptr % 2 MiB`, `% 64 KiB`, class A = 2 MiB aligned / B = 64 KiB / C);

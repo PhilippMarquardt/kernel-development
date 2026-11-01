@@ -251,3 +251,58 @@ def test_parked_gives_way_to_foreign_holder(tmp_path, monkeypatch) -> None:
     t.join(5)
     os.close(foreign)
     assert "e" in res and res["e"].details.get(phase.REQUEUE_FLAG)
+
+
+@pytest.mark.skipif(not POSIX, reason="POSIX flock")
+def test_whole_mode_is_exclusive_from_prepare(tmp_path, monkeypatch) -> None:
+    """After giving way once, the head restarts 'whole': EX from prepare to exit (FIFO), no park/unlock."""
+    from kdev.service import lockq
+
+    monkeypatch.setattr(lockq, "view", lambda cfg, **kw: lockq.QueueView())
+    monkeypatch.setenv("KDEV_EXCLUSIVE", "")
+    lp = str(tmp_path / "gpu.lock")
+    pl = phase.PhasedLock(lp, tmp_path, apps_fn=lambda: [], whole=True)
+    pl.entry = phase.Entry(tmp_path, pid=931)
+    pl.entry.doc["start"] = None
+    pl.slot_fd = -1
+    pl.prepare()
+    assert not phase._lock_free(lp)                  # EX: even a SHARED prepare elsewhere must wait
+    pl.park()
+    assert not phase._lock_free(lp)
+    f = pl.exclusive()
+    assert f.whole and f.exclusive == "ok" and not phase._lock_free(lp)
+    os.close(pl.fd)
+    assert phase._lock_free(lp)
+
+
+@pytest.mark.skipif(not POSIX, reason="pass_fds / flock")
+def test_requeued_head_restarts_whole(tmp_path, monkeypatch) -> None:
+    from kdev.timing import judge_mode as JM
+
+    log = tmp_path / "env.log"
+    fake = tmp_path / "fakepy"
+    fake.write_text(f"""#!{sys.executable}
+import json, os, sys, time
+jp = sys.argv[3]; d = os.path.dirname(jp); i = json.load(open(jp))["params"]["extra"]["ab_proc"]
+with open({str(log)!r}, "a") as f: f.write(f"{{i}} {{os.environ['KDEV_PHASE_WHOLE']}}\\n")
+go = os.environ["KDEV_PHASE_GO"]
+while not os.path.exists(go): time.sleep(0.02)
+mark = os.path.join({str(tmp_path)!r}, "gave_%d" % i)
+if i == 0 and not os.path.exists(mark):
+    open(mark, "w").close()
+    print(json.dumps({{"status": "error", "error": {{"code": "gpu_busy_timeout", "message": "x",
+                                                   "details": {{"phase_requeue": True}}}}}}))
+    sys.exit(1)
+print(json.dumps({{"status": "ok", "verdict": "same", "run_id": "p%d" % i}}))
+""")
+    fake.chmod(0o755)
+    monkeypatch.setenv("KDEV_HOME", str(tmp_path))
+    files = [FileRef(path=str(tmp_path / f"{x}.py"), label=x) for x in "AB"]
+    spec = JobSpec(kind="ab", files=files, params={"extra": {"judge_mode": True}}, job_id="t")
+    seq = ["A", "B"]
+    got = list(JM._phased_children(spec, seq, {f.label: f for f in files}, str(tmp_path), time.time() + 600,
+                                   lambda m: None, try_slot=lambda: os.open(os.devnull, os.O_RDONLY),
+                                   python=str(fake), free_mib=lambda: 10 ** 6))
+    assert [g[2]["status"] for g in got] == ["ok", "ok"], got
+    lines = log.read_text().split()
+    assert sorted(zip(lines[::2], lines[1::2])) == [("0", "0"), ("0", "1"), ("1", "0")]

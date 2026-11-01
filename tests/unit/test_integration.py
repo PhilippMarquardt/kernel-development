@@ -198,6 +198,21 @@ def test_build_discover_loop_rebuilds_until_complete(tmp_path):
     out, rounds, warns = _discover_loop(str(f), rep, lambda p: (rebuilt.append(p), rep)[1], {}, [], ctx)
     assert [r["pending"] for r in rounds] == [3, 1, 0] and len(rebuilt) == 2 and not warns
     assert all(s.kind == "discover" and not s.requires_prebuilt and s.lane == "gpu" for s in subs)
+    assert subs[0].timeout_s == 900 and subs[0].params["extra"]["budget_s"] == 600
+
+    subs.clear()                                    # --discover-timeout / $KDEV_DISCOVER_TIMEOUT (decode agent: 900 s)
+    answers = iter([Result(tool="discover", verdict="complete", summary={"pending": 0})])
+    _discover_loop(str(f), rep, lambda p: rep, {}, [], ctx, timeout_s=2400)
+    assert subs[0].timeout_s == 2400 and subs[0].params["extra"]["budget_s"] == 1600
+    import os
+
+    from kdev.build.discover import discover_timeout
+
+    os.environ["KDEV_DISCOVER_TIMEOUT"] = "1800"
+    try:
+        assert discover_timeout() == 1800 and discover_timeout(300) == 300
+    finally:
+        del os.environ["KDEV_DISCOVER_TIMEOUT"]
 
     def boom(spec):
         raise KdevError(ErrorCode.CAPABILITY_UNAVAILABLE, "no gpu")

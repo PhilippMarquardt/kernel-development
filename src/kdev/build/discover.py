@@ -81,8 +81,27 @@ def run_discover(spec: JobSpec, run_dir: Any) -> Result:
                   warnings=[e for e in errors[:3]] if pending else [])
 
 
+DEFAULT_TIMEOUT_S = 900.0
+
+
+def discover_timeout(timeout_s: float | None = None) -> float:
+    """Job timeout of one discovery round: ``--discover-timeout`` > ``$KDEV_DISCOVER_TIMEOUT`` > 900 s."""
+    if timeout_s:
+        return max(60.0, float(timeout_s))
+    try:
+        return max(60.0, float(os.environ.get("KDEV_DISCOVER_TIMEOUT") or DEFAULT_TIMEOUT_S))
+    except ValueError:
+        return DEFAULT_TIMEOUT_S
+
+
+def discover_budget(timeout_s: float) -> int:
+    """In-job prepare+call budget: 2/3 of the timeout (the rest covers the lock wait and CUDA init)."""
+    return int(max(30.0, timeout_s * 2 / 3))
+
+
 def discover_loop(path: str, report: Any, rebuild: Any, knobs: dict[str, Any], defines: list[str], ctx: Any,
-                   *, max_rounds: int = 6) -> tuple[Any, list[dict[str, Any]], list[str]]:
+                   *, max_rounds: int = 6, timeout_s: float | None = None
+                   ) -> tuple[Any, list[dict[str, Any]], list[str]]:
     """Build -> GPU discovery job (prepare + one call per shape, hook in discover mode: nothing compiles under
     the lock) -> rebuild the recorded calls, until a discovery pass finds nothing pending. Returns
     (final report, rounds, warnings). Skipped (with a warning) when GPU jobs are unavailable."""
@@ -91,13 +110,14 @@ def discover_loop(path: str, report: Any, rebuild: Any, knobs: dict[str, Any], d
     from kdev.models import FileRef, JobSpec
     from kdev.util import md5_file, new_id, utc_now
 
+    tmo = discover_timeout(timeout_s)
     rounds: list[dict[str, Any]] = []
     for rnd in range(1, max_rounds + 1):
         spec = JobSpec(kind="discover", lane="gpu", files=[FileRef(path=os.path.abspath(path), label="A",
                                                                    md5=md5_file(path), knobs=dict(knobs),
                                                                    defines=list(defines))],
-                       params={"extra": {"budget_s": 600}}, problem=ctx.problem, job_id=new_id("j"),
-                       agent=ctx.agent or os.environ.get("KDEV_AGENT", ""), timeout_s=900,
+                       params={"extra": {"budget_s": discover_budget(tmo)}}, problem=ctx.problem,
+                       job_id=new_id("j"), agent=ctx.agent or os.environ.get("KDEV_AGENT", ""), timeout_s=int(tmo),
                        run_name=f"discover-{Path(path).stem}", submitted_utc=utc_now(), requires_prebuilt=False)
         try:
             r = ctx.submit(spec)
