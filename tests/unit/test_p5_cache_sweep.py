@@ -378,3 +378,46 @@ def test_build_py_default_args_entry_failure_is_not_fatal(tmp_path, fake_torch):
     rep = comp.build_file(str(sub), home=str(tmp_path / "home"), toolchain=TC, python=sys.executable)
     assert not [e for e in rep.errors if e.startswith("build_failed")], rep.errors
     assert any("default-args entry build failed" in e for e in rep.errors)
+
+
+def test_shim_long_ext_name_builds_and_loads_under_short_alias(tmp_path):
+    """board #155: CPython only imports module names <= 200 chars (PyInit_%.200s); kdev aliases longer ones."""
+    long = "okc_moe_w4a16_v216x_" + "_".join(f"okc_knob{i}" for i in range(22)) + "_ab19200_sm90a"
+    assert len(long) > _shim.MAX_MODULE_NAME
+    short = _shim.load_name(long)
+    assert len(short) == _shim.MAX_MODULE_NAME and short != long and short == _shim.load_name(long)
+    assert _shim.load_name(long + "x") != short and _shim.load_name("ext_a") == "ext_a"
+    h = _shim.Hook(mode="build", ext_root=str(tmp_path), tc_version="13.0.88", tc_ptxas="p")
+    real = _fake_real_load_inline()
+    h.real = {"load_inline": real}
+    f = h.make("load_inline")
+    f(long, "cpp", cuda_sources="cuda")
+    assert real.calls[0]["name"] == short
+    rec = h.records[0]
+    assert rec["status"] == "ok" and rec["name"] == long and rec["load_name"] == short
+    assert rec["so_path"].endswith(short + ".so") and Path(rec["dir"], _shim.MARKER).is_file()
+    assert rec["key"] == _shim.call_key("load_inline", {"name": long, "cpp_sources": "cpp", "cuda_sources": "cuda"},
+                                        "13.0.88", "p", {}, [])   # key over the real name (pending records)
+    f(long, "cpp", cuda_sources="cuda")
+    assert h.records[1]["cache_hit"] and len(real.calls) == 1        # complete entry found under the alias
+
+
+def test_build_py_failure_reports_exception_not_log_tail(tmp_path):
+    """board #155: an ImportError after a successful ninja run must surface, not 'ninja: no work to do'."""
+    log = tmp_path / "build.log"
+    log.write_text("### kdev build attempt 1: load_inline x key=k\nninja: no work to do.\n")
+    out = {"exts": [{"name": "x" * 210, "load_name": "x" * 200, "key": "k", "dir": str(tmp_path), "status": "failed",
+                     "log_path": str(log), "error": "ImportError: dynamic module does not define module export "
+                                                     "function (PyInit_xxx)"}], "errors": []}
+
+    def runner(cmd, timeout=None, env=None):
+        Path(json.loads(Path(cmd[-1]).read_text())["out"]).write_text(json.dumps(out))
+        return Proc(argv=cmd, returncode=0, stdout="", stderr="")
+
+    src = tmp_path / "sub.py"
+    src.write_text("x = 1\n")
+    rep = comp.BuildReport(file=str(src), md5="x")
+    comp._build_py(str(src), rep, TC, str(tmp_path / "home"), {}, [], False, runner, "python", 60)  # noqa: SLF001
+    fails = [e for e in rep.errors if e.startswith("build_failed")]
+    assert fails and "does not define module export function" in fails[0] and "no work to do" not in fails[0]
+    assert any("chars > 200" in e and "shorten name=" in e for e in rep.errors)

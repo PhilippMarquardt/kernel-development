@@ -113,6 +113,20 @@ def scan_pending(ext_root: str, path: str, tc_version: str, tc_ptxas: str, *, pr
     return keep, removed
 
 
+# CPython looks the init symbol up as "PyInit_%.200s" (Python/importdl.c): a module name longer than 200 chars
+# links fine but never imports ("dynamic module does not define module export function"), board #155.
+MAX_MODULE_NAME = 200
+
+
+def load_name(name: str) -> str:
+    """The name kdev hands torch for extension ``name``: unchanged when CPython can import it, otherwise
+    ``name[:183] + '_' + sha1(name)[:16]`` (200 chars, deterministic, unique per full name). Records keep the
+    real name; plain torch (the judge) would fail on the long name, so the build report warns."""
+    if len(name) <= MAX_MODULE_NAME:
+        return name
+    return name[:MAX_MODULE_NAME - 17] + "_" + hashlib.sha1(name.encode()).hexdigest()[:16]  # noqa: S324
+
+
 def _jsonable(v) -> bool:
     if v is None or isinstance(v, (str, int, float, bool)):
         return True
@@ -234,7 +248,11 @@ class Hook:
         marker = os.path.join(d, MARKER)
         rec = {"name": name, "kind": kind, "key": key, "dir": d, "cache_hit": False, "seconds": 0.0,
                "status": "ok", "log_path": os.path.join(d, "build.log"), "so_path": ""}
-        complete = os.path.isfile(marker) and _so_in(d, name)
+        lname = load_name(name)
+        if lname != name:                   # too long for CPython's import: build/load under a short alias
+            rec["load_name"] = lname
+            kw = dict(kw, name=lname)
+        complete = os.path.isfile(marker) and _so_in(d, lname)
         if self.mode == "use":
             if not complete:
                 if not self.allow_jit and self.legacy_fallback and not (self.knobs or self.defines):
@@ -254,13 +272,13 @@ class Hook:
                                      f"run `kdev build` first")
                 return self._build(kind, kw, rec, d, marker, stub=False)
             rec["cache_hit"] = True
-            rec["so_path"] = _so_in(d, name)
+            rec["so_path"] = _so_in(d, lname)
             self.records.append(rec)
             from torch.utils import cpp_extension as ce  # noqa: PLC0415 - worker only
-            return ce._import_module_from_library(name, d, kw.get("is_python_module", True))  # noqa: SLF001
+            return ce._import_module_from_library(lname, d, kw.get("is_python_module", True))  # noqa: SLF001
         if complete and not self.force:
             rec["cache_hit"] = True
-            rec["so_path"] = _so_in(d, name)
+            rec["so_path"] = _so_in(d, lname)
             self.records.append(rec)
             return _Stub(name)
         return self._build(kind, kw, rec, d, marker, stub=True)
@@ -397,7 +415,7 @@ class Hook:
             rec["error"] = err[-4000:]
             self.records.append(rec)
             raise ExtBuildFailed(f"extension {rec['name']} failed to build: {err[:400]}")
-        rec["so_path"] = _so_in(d, rec["name"])
+        rec["so_path"] = _so_in(d, rec.get("load_name") or rec["name"])
         info = {k: rec[k] for k in ("name", "kind", "key", "seconds", "so_path")}
         info.update({"tc_version": self.tc_version, "tc_ptxas": self.tc_ptxas, "knobs": self.knobs,
                      "defines": self.defines, "built_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

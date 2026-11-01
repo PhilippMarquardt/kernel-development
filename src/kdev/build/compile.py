@@ -264,8 +264,19 @@ def _build_py(path: str, report: BuildReport, pin: Toolchain, home: str | None, 
                        seconds=float(r.get("seconds", 0.0)), so_path=r.get("so_path", ""),
                        log_path=r.get("log_path", ""))
         report.exts.append(ext)
+        if r.get("load_name"):
+            report.errors.append(f"warning: extension name is {len(r['name'])} chars > {_shim.MAX_MODULE_NAME}: "
+                                 "CPython cannot import it under that name (PyInit_ symbol lookup is cut at "
+                                 f"{_shim.MAX_MODULE_NAME}); kdev builds/loads it as {r['load_name']!r}, but a plain "
+                                 "load_inline (the judge) FAILS with 'does not define module export function': "
+                                 "shorten name= before submitting")
         if r.get("status") != "ok":
-            first = " | ".join(_first_errors(_read(ext.log_path), 5))
+            log_errs = [ln for ln in _first_errors(_read(ext.log_path), 5) if _ERR_LINE.search(ln)]
+            exc = (r.get("error") or "").strip()
+            # compiler errors from build.log; otherwise (link/import failure after ninja) the exception itself,
+            # never the log tail ('ninja: no work to do' hid an ImportError, board #155)
+            first = " | ".join(log_errs) if log_errs else (exc.splitlines()[-1][:400] if exc else
+                                                             " | ".join(_first_errors(_read(ext.log_path), 5)))
             if r.get("origin") == "entry":
                 # built by calling a build entry point with its default arguments (a guess): the file's real
                 # prepare may never make this call, so it does not fail the build; discovery finds the real ones
