@@ -143,7 +143,7 @@ SHARED_KINDS = ("discover", "check")              # untimed GPU work: the whole 
 
 
 def mode(spec: Any) -> str | None:
-    """'phased' (judge-mode time/ab: prepare shared, timed section exclusive), 'shared' (untimed GPU jobs:
+    """'phased' (judge-mode time/ab and timeline: prepare shared, timed section exclusive), 'shared' (untimed GPU jobs:
     discover, check without --cold: shared for the whole job) or None (exclusive for the whole job).
     POSIX only; ``KDEV_PHASED=0`` or ``extra.phased = false`` opt out."""
     if sys.platform == "win32" or os.environ.get("KDEV_PHASED", "1") in ("0", "held"):
@@ -156,6 +156,8 @@ def mode(spec: Any) -> str | None:
     if kind in SHARED_KINDS:
         return None if extra.get("cold") else "shared"
     if kind in ("time", "ab") and extra.get("judge_mode") and not extra.get("fast"):
+        return "phased"
+    if kind == "timeline":                         # load/prepare/capture shared, replays exclusive
         return "phased"
     return None
 
