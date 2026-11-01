@@ -355,3 +355,30 @@ def test_cli_sass_needs_build(tmp_path):
     f.write_text("x = 1\n")
     res = cli_run(["sass", str(f)])
     assert res.error is not None and res.error.code == "needs_build" and res.exit_code == 4
+
+
+def test_lock_without_disassembler_falls_back_to_triton_cuobjdump(tmp_path, monkeypatch):
+    """board #155: a trimmed CUDA tree (nvcc+ptxas only) left pin.cuobjdump pointing at a missing file, so builds
+    never extracted SASS; disassemblers fall back to another CUDA tree / triton's bundled copy."""
+    from kdev.build import toolchain as tcm
+
+    home = tmp_path / "cuda13w"
+    (home / "bin").mkdir(parents=True)
+    for t in ("nvcc", "ptxas"):
+        (home / "bin" / (t + tcm._EXE)).write_text("")  # noqa: SLF001
+    venv = tmp_path / "venv"
+    tb = venv / "lib" / "python3.12" / "site-packages" / "triton" / "backends" / "nvidia" / "bin"
+    tb.mkdir(parents=True)
+    (tb / ("cuobjdump" + tcm._EXE)).write_text("")  # noqa: SLF001
+    lock = tmp_path / "toolchain.lock"
+    lock.write_text(f'nvcc_version = "13.0.88"\ncuda_home = "{home.as_posix()}"\n'
+                    f'python = "{(venv / "bin" / "python").as_posix()}"\n')
+    monkeypatch.setattr(tcm.shutil, "which", lambda *a, **k: None)
+    monkeypatch.setattr(tcm, "_disasm_fallbacks", lambda tool, python=None, _f=tcm._disasm_fallbacks:  # noqa: SLF001
+                        [p for p in _f(tool, python) if str(tmp_path) in str(p)])
+    for k in ("KDEV_CUDA_HOME", "CUDA_HOME"):
+        monkeypatch.delenv(k, raising=False)
+    tc = tcm.load_lock(str(lock))
+    assert Path(tc.cuobjdump) == tb / ("cuobjdump" + tcm._EXE)  # noqa: SLF001
+    assert Path(tc.ptxas) == home / "bin" / ("ptxas" + tcm._EXE)  # noqa: SLF001  (compilers never fall back)
+    assert Path(tc.nvdisasm).parent == home / "bin"     # nothing found: the pinned (missing) path stays

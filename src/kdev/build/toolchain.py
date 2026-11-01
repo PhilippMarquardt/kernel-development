@@ -21,6 +21,7 @@ else:  # pragma: no cover
     import tomli as _toml  # type: ignore[no-redef]
 
 TOOLS = ("nvcc", "ptxas", "cuobjdump", "nvdisasm")
+DISASM_TOOLS = ("cuobjdump", "nvdisasm")   # read binaries only: any version works
 _EXE = ".exe" if os.name == "nt" else ""
 _VER_RE = re.compile(r"release\s+([\d.]+),\s*V([\d.]+)")
 _NOTE_RE = re.compile(rb"(?:Cuda compilation tools[^\x00\n]{0,60}|Build cuda_[^\x00\n]{0,40})")
@@ -41,6 +42,10 @@ def load_lock(path: str) -> Toolchain:
                 cand = Path(tc.cuda_home) / "bin" / (tool + _EXE)
                 if _EXE and not cand.exists():
                     cand = Path(tc.cuda_home) / "bin" / tool
+                if not cand.exists() and tool in DISASM_TOOLS:
+                    # a trimmed toolkit (e.g. /root/cuda13w: nvcc+ptxas only) has no disassembler; any
+                    # cuobjdump/nvdisasm reads the cubins (it never makes SASS), so fall back (board #155)
+                    cand = Path(find_tool(tool, tc.cuda_home, python=tc.python) or cand)
                 setattr(tc, tool, str(cand))
     if not tc.source:
         tc.source = f"lock:{path}"
@@ -62,8 +67,22 @@ def find_lock(problem_dir: str | None) -> str | None:
     return None
 
 
-def find_tool(tool: str, cuda_home: str | None = None) -> str:
-    """Path of a CUDA tool under ``cuda_home/bin`` (``$KDEV_CUDA_HOME``, ``$CUDA_HOME``), else on PATH; ''."""
+def _disasm_fallbacks(tool: str, python: str | None = None) -> list[Path]:
+    """Other places a cuobjdump/nvdisasm lives: /usr/local/cuda*/bin (newest first) and triton's bundled
+    ``triton/backends/nvidia/bin`` next to this interpreter or the pinned ``python``."""
+    out = sorted(Path("/usr/local").glob(f"cuda*/bin/{tool}{_EXE}"), reverse=True)
+    prefixes = {sys.prefix}
+    if python:
+        prefixes.add(str(Path(python).parent.parent))      # venv/bin/python -> venv (not resolved: venv)
+    for pre in sorted(prefixes):
+        out += sorted(Path(pre).glob(f"lib/python3*/site-packages/triton/backends/nvidia/bin/{tool}{_EXE}"))
+        out += sorted(Path(pre).glob(f"Lib/site-packages/triton/backends/nvidia/bin/{tool}{_EXE}"))
+    return out
+
+
+def find_tool(tool: str, cuda_home: str | None = None, python: str | None = None) -> str:
+    """Path of a CUDA tool under ``cuda_home/bin`` (``$KDEV_CUDA_HOME``, ``$CUDA_HOME``), else on PATH; ''.
+    Disassemblers (``DISASM_TOOLS``) also fall back to other CUDA trees / triton's bundled copy."""
     for home in (cuda_home, os.environ.get("KDEV_CUDA_HOME"), os.environ.get("CUDA_HOME")):
         if not home:
             continue
@@ -71,7 +90,10 @@ def find_tool(tool: str, cuda_home: str | None = None) -> str:
             p = Path(home) / "bin" / name
             if p.is_file():
                 return str(p)
-    return shutil.which(tool) or ""
+    found = shutil.which(tool) or ""
+    if not found and tool in DISASM_TOOLS:
+        found = next((str(p) for p in _disasm_fallbacks(tool, python) if p.is_file()), "")
+    return found
 
 
 def detect(cuda_home: str | None = None, runner: Runner = run) -> Toolchain:
