@@ -382,3 +382,5 @@ def test_lock_without_disassembler_falls_back_to_triton_cuobjdump(tmp_path, monk
     assert Path(tc.cuobjdump) == tb / ("cuobjdump" + tcm._EXE)  # noqa: SLF001
     assert Path(tc.ptxas) == home / "bin" / ("ptxas" + tcm._EXE)  # noqa: SLF001  (compilers never fall back)
     assert Path(tc.nvdisasm).parent == home / "bin"     # nothing found: the pinned (missing) path stays
+    lock.write_text(lock.read_text() + f'cuobjdump = "{(home / "bin" / "cuobjdump").as_posix()}"\n')
+    assert Path(toolchain.load_lock(str(lock)).cuobjdump) == tb / ("cuobjdump" + tcm._EXE)  # explicit missing path

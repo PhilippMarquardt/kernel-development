@@ -47,6 +47,10 @@ def load_lock(path: str) -> Toolchain:
                     # cuobjdump/nvdisasm reads the cubins (it never makes SASS), so fall back (board #155)
                     cand = Path(find_tool(tool, tc.cuda_home, python=tc.python) or cand)
                 setattr(tc, tool, str(cand))
+    for tool in DISASM_TOOLS:              # a lock naming a missing disassembler (pod_install writes them all)
+        cur = getattr(tc, tool)
+        if cur and not Path(cur).exists():
+            setattr(tc, tool, find_tool(tool, tc.cuda_home, python=tc.python) or cur)
     if not tc.source:
         tc.source = f"lock:{path}"
     tc.extra.setdefault("lock_path", str(path))
