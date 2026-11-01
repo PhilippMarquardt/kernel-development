@@ -225,7 +225,7 @@ def register(reg: Registry) -> None:
                       Arg(("--mufu",), "MUFU (SFU) ops: ex2/rcp/rsqrt/...", type="float", default=None),
                       Arg(("--dtype",), "bf16|fp16|fp8|fp4|int8|tf32|fp32", default="bf16"),
                       Arg(("--terms",), "skeleton terms 'dram_trips=3 merges=1 kernel_boundaries=0 ...'", default=None),
-                      Arg(("--us",), "current time of the shape (judge units) -> gap and %/us", type="float",
+                      Arg(("--us",), "current time of the shape (judge units) -> gap and %%/us", type="float",
                           default=None),
                       Arg(("--plan",), "skeleton plan TOML (one shape or [shapes.ID] tables)", type="path",
                           default=None),

@@ -307,7 +307,7 @@ def register(reg: Registry) -> None:
                 args=[Arg(("title",), "short title"), Arg(("--hypothesis",), "what and why", default=""),
                       Arg(("--kind",), "idea|dead|limit|win", choices=("idea", "dead", "limit", "win"),
                           default="idea"),
-                      Arg(("--gain",), "expected gain %", type="float", default=None),
+                      Arg(("--gain",), "expected gain %%", type="float", default=None),
                       Arg(("--tags",), "comma-separated", default=""),
                       Arg(("--variant",), "exact variant (required for dead)", default="")],
                 effects=W_IDEAS, package=P)

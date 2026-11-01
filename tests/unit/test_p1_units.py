@@ -385,3 +385,12 @@ def test_doctor_cli_end_to_end(capsys):
     code = cli.main(["doctor", "--json"])
     d = json.loads(capsys.readouterr().out)
     assert validate_result(d) == [] and d["tool"] == "doctor" and code == d["exit_code"]
+
+
+def test_every_command_help_renders():
+    """board #155: a bare '%' in a help string crashed `kdev floor --help` (argparse %-formats help)."""
+    from kdev.cli import build_parser
+    from kdev.registry import build_registry
+
+    for cmd in build_registry().all():
+        build_parser(cmd).format_help()
