@@ -40,10 +40,11 @@ from kdev.timing import stats
 PROTOCOL_TAG = "kdev-tp/1+jm"
 GATE_US = 235.0                 # + ~65 us read flush = judge replay_overhead.gate_ns (~299 us)
 SM_MHZ = 1980                   # H200 max SM clock: torch.cuda._sleep cycles per us
-FRESH = 8                       # judge: fresh inputs every pair; jf.py pool of 8 seeded inputs
+FRESH = 100                     # fresh input sets cycled per rep pair. Was 8 (jf.py pool); 11-02 MoE calibration:
+                                # 8 sets left routing-dependent shapes 7-13% off the judge, 100 matched within ~2%
 FRESH_STRIDE = 7919
 POOL_BUDGET_BYTES = 2 << 30
-REPS = 60                       # judge runs per bf16/attention shape
+REPS = 200                      # rep pairs cycle the FRESH pool (100 sets x both orders); was 60
 OVH_EVERY = 4
 N_BOOT = 1000
 BASE = "base"

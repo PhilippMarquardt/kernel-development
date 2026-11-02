@@ -377,8 +377,10 @@ class OkcAdapter:
         return {k: bool(v) for k, v in dict(self.config.get("input_variance", {})).items()}
 
     def default_seeds(self) -> int:
-        """Seeds per shape by default (DESIGN 6.5): 5 for routing/length-dependent inputs, else 1."""
-        return 5 if any(self.input_variance().values()) else 1
+        """Seeds per shape by default: 1. Routing/length variance comes from judge mode's fresh pool (FRESH input
+        sets of one base seed, copied into the captured graph inputs), as the judge does. N > 1 seeds cycle N FIXED
+        input sets and were biased on MoE (11-02: 5 fixed routings flipped a d32 verdict from -3 to +6 us)."""
+        return 1
 
     def judge_seed(self, shape: Shape) -> int | None:
         """The judge seed of a shape when known: set on shapes built from a judge JSON (judge_cases), else the

@@ -182,7 +182,7 @@ def test_okc_adapter_pure(prob):
     assert a.problem == "fake_prob" and a.problem_dir == str(d)
     assert [s.shape_id for s in a.shapes()] == ["d1/a", "d1/b", "v16/a"]
     assert all(not s.scored for s in a.tests() + a.extra_shapes())
-    assert a.input_variance() == {"routing": True} and a.default_seeds() == 5
+    assert a.input_variance() == {"routing": True} and a.default_seeds() == 1  # variance via the fresh pool
     assert a.protocol.judge_reps == 9 and a.protocol.budget_s == 600 and a.protocol.overhead_us == 4.0
     assert a.judge_seed(a.shapes()[0]) == 11 and a.judge_repeats("d1/a") == 60 and a.judge_repeats("v16/a") == 9
     assert a.floor_us("d1/a") == 1.0
