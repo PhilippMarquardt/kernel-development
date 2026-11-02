@@ -385,6 +385,21 @@ def _queue_waiter(cfg: Config, priority: int | None, job_id: str | None, agent: 
     return entry, w
 
 
+def _yield_to_starving(cfg: Config, stop: Callable[[], None]) -> float:
+    """Turnstile (service.phase, board #314): before requesting EX, give way (bounded, phase.YIELD_S) to a
+    phased SHARED waiter that has starved for phase.STARVE_S behind back-to-back exclusive sections."""
+    if sys.platform == "win32":
+        return 0.0
+    try:
+        from kdev.service import phase  # noqa: PLC0415
+
+        return phase.Turnstile(cfg.home, phase.SH_WAIT).wait(stop)
+    except KdevError:
+        raise
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
 def _stderr_progress(msg: str) -> None:
     print(f"kdev: {msg}", file=sys.stderr, flush=True)
 
@@ -414,6 +429,9 @@ def _exclusive_gen(cfg: Config, *, timeout_s: float | None = None, job_id: str |
             if abort is not None and abort():
                 raise KdevError(ErrorCode.CANCELLED, "cancelled while waiting for the GPU lock")
 
+        yielded = _yield_to_starving(cfg, _stop)
+        if yielded >= 1.0:
+            qinfo["yielded_s"] = round(yielded, 1)
         if lk.try_acquire():
             qinfo.update(position=0, queue_len=0, eta_s=0)
         else:

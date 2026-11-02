@@ -325,6 +325,8 @@ def _phased_children(spec: JobSpec, seq: list[str], by_label: dict[str, FileRef]
     attempts = [0] * n
     st = {"head": 0, "nxt": 0}     # head: first unfinished process (it holds the go token)
     min_free = int(os.environ.get("KDEV_PHASE_MIN_FREE_MIB", MIN_FREE_MIB))
+    # turnstile (board #314): do not grab a free prepare slot while another job's slot waiter starves
+    gate = phase.Turnstile(None, phase.SLOT_WAIT)
 
     def start(i: int) -> None:
         lb = seq[i]
@@ -366,9 +368,16 @@ def _phased_children(spec: JobSpec, seq: list[str], by_label: dict[str, FileRef]
         while st["head"] < n:
             head = st["head"]
             while st["nxt"] < n and (st["nxt"] == head or min_free <= 0 or (free_mib() or 0) >= min_free):
+                if gate.blocked():
+                    if gate.to and not st.get("yield_logged"):
+                        st["yield_logged"] = 1
+                        log(f"yielding the prepare slot to starving waiter(s) {gate.to} (max {gate.max_s:.0f}s)")
+                    break
                 fd = slot_fn()
                 if fd is None:
                     break
+                gate.reset()
+                st.pop("yield_logged", None)
                 slots[st["nxt"]] = fd
                 start(st["nxt"])
                 st["nxt"] += 1

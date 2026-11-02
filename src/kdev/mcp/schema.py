@@ -20,7 +20,7 @@ from kdev.registry import GLOBAL_ARGS, GPU_ARGS, Arg, Command
 HIDDEN_COMMANDS = frozenset({
     "judge pair",            # the only path to a judge check (quota); CLI-only behind --allow-check
     "lock run",              # raw command under the GPU lock
-    "serve", "serve start", "serve stop", "serve run", "serve status",
+    "serve", "serve start", "serve stop", "serve run", "serve status", "serve ensure",
     "remote", "remote setup",
     "sync", "sync push", "sync pull", "sync both",
     "job submit",            # raw JobSpec files (could carry an exec job); agents use the typed GPU tools

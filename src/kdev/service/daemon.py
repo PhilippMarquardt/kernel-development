@@ -41,6 +41,10 @@ from kdev.service.lock import _FileLock, _kill_tree
 from kdev.util import utc_now
 
 HEARTBEAT_S = 5.0
+STALE_S = 30.0            # ensure(): no heartbeat for this long (or a dead pid) = the daemon is gone
+# job-scoped env of a client that runs inside a kdev job: never inherited by a daemon it starts
+_JOB_ENV = ("KDEV_JOB_ID", "KDEV_PHASED", "KDEV_PHASE_MODE", "KDEV_PHASE_GO", "KDEV_PHASE_SLOT_FD", "KDEV_PHASE_WHOLE",
+            "KDEV_EXCLUSIVE", "KDEV_WAITED_S", "KDEV_LOG_CAPTURED")
 _STOP = threading.Event()
 
 
@@ -189,7 +193,9 @@ def start_background(cfg: Config, opts: DaemonOptions) -> int:
         return int(hb.get("pid") or 0)
     argv = [sys.executable, "-m", "kdev", "serve", "run", "--foreground", "--build-workers", str(opts.build_workers),
             "--home", str(cfg.home)]
-    env = dict(os.environ)
+    env = {k: v for k, v in os.environ.items() if k not in _JOB_ENV}
+    if env.get("CUDA_VISIBLE_DEVICES") == "":       # started from a build-lane child: the GPU lanes need CUDA
+        env.pop("CUDA_VISIBLE_DEVICES")
     env["KDEV_HOME"] = str(cfg.home)
     env["KDEV_LOCK_PATH"] = cfg.lock_path
     src = str(Path(__file__).resolve().parents[2])
@@ -216,6 +222,45 @@ def start_background(cfg: Config, opts: DaemonOptions) -> int:
             break
         time.sleep(0.2)
     return proc.pid
+
+
+def heartbeat_age_s(cfg: Config) -> float | None:
+    """Seconds since the last heartbeat (None: no heartbeat row: never served here, or stopped cleanly)."""
+    try:
+        hb = queue.heartbeat_row(cfg)
+    except Exception:  # noqa: BLE001
+        return None
+    return queue._age_s(hb["ts_utc"]) if hb else None
+
+
+def ensure(cfg: Config, opts: DaemonOptions | None = None, *, stale_s: float = STALE_S,
+           wait_s: float = 15.0) -> dict:
+    """`kdev serve ensure`: start the daemon unless one is alive (heartbeat younger than ``stale_s`` and a live
+    pid). Idempotent: concurrent callers serialise on $KDEV_HOME/serve.ensure.lock (the loser only waits for
+    the heartbeat), and a second daemon on the same home refuses to start anyway (serve.lock).
+    Returns {alive, started, pid, age_s}."""
+    if queue.daemon_alive(cfg, max_age_s=stale_s):
+        hb = queue.heartbeat_row(cfg) or {}
+        return {"alive": True, "started": False, "pid": hb.get("pid"), "age_s": heartbeat_age_s(cfg)}
+    age = heartbeat_age_s(cfg)
+    Path(cfg.home).mkdir(parents=True, exist_ok=True)
+    guard = _FileLock(str(Path(cfg.home) / "serve.ensure.lock"))
+    started, pid = False, None
+    try:
+        if guard.try_acquire():
+            if not queue.daemon_alive(cfg, max_age_s=stale_s):    # re-check under the guard
+                pid = start_background(cfg, opts or DaemonOptions(foreground=False))
+                started = True
+        else:
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < wait_s and not queue.daemon_alive(cfg, max_age_s=stale_s):
+                time.sleep(0.2)
+    finally:
+        guard.release()
+    alive = queue.daemon_alive(cfg, max_age_s=stale_s)
+    if pid is None:
+        pid = (queue.heartbeat_row(cfg) or {}).get("pid")
+    return {"alive": alive, "started": started, "pid": pid, "age_s": age}
 
 
 def stop(cfg: Config, timeout_s: float = 60) -> bool:

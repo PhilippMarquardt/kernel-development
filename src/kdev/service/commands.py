@@ -49,6 +49,14 @@ def cmd_serve(args: Namespace, ctx: Context) -> Result:
         if not alive:
             r.warnings.append("no heartbeat within 15 s: check serve.log")
         return r
+    if action == "ensure":
+        info = daemon.ensure(cfg, opts)
+        verb = "started" if info["started"] else "already running" if info["alive"] else "not alive"
+        r = Result(tool="serve", verdict="running" if info["alive"] else "starting", summary=info,
+                   lines=[f"kdev serve {verb} (pid {info.get('pid') or '-'}); log {Path(cfg.home) / 'serve.log'}"])
+        if not info["alive"]:
+            r.warnings.append("no heartbeat within 15 s: check serve.log")
+        return r
     if action == "stop":
         ok = daemon.stop(cfg)
         if not ok:
@@ -203,8 +211,9 @@ def cmd_lock_run(args: Namespace, ctx: Context) -> Result:
 
 
 def register(reg: Registry) -> None:
-    reg.command("serve", "GPU job service daemon: start|stop|status|run", cmd_serve,
-                args=[Arg(("action",), "start|stop|status|run", choices=("start", "stop", "status", "run"),
+    reg.command("serve", "GPU job service daemon: start|stop|status|run|ensure (start unless alive)", cmd_serve,
+                args=[Arg(("action",), "start|stop|status|run|ensure",
+                          choices=("start", "stop", "status", "run", "ensure"),
                           nargs="?", default="status"),
                       Arg(("--build-workers",), "parallel compile workers (capped by CPU quota and 16)", type="int",
                           default=8),

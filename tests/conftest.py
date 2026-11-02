@@ -63,6 +63,7 @@ def _isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("KDEV_HOME", str(home))
     monkeypatch.setenv("KDEV_AGENT", "pytest")
     monkeypatch.setenv("KDEV_LOCK_PATH", str(tmp_path / "gpu.lock"))
+    monkeypatch.setenv("KDEV_AUTO_SERVE", "0")      # the client watchdog never starts a real daemon in tests
     if os.environ.get("KDEV_GPU_TESTS") != "1":
         monkeypatch.setenv("KDEV_NO_GPU", "1")
     yield

@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import time
 from pathlib import Path
 
@@ -20,10 +22,43 @@ def _deny_check(cfg: Config, spec: JobSpec) -> None:
                         recovery="judge checks only via `kdev judge pair --allow-check`; never submit")
 
 
+AUTO_SERVE_CHECK_S = 10.0       # wait(): how often to look at the daemon heartbeat
+
+
+def auto_serve_enabled() -> bool:
+    return os.environ.get("KDEV_AUTO_SERVE", "1") != "0"
+
+
+def ensure_daemon(cfg: Config, *, only_if_seen: bool = False) -> bool:
+    """Watchdog (11-01: the daemon died and every waiting job hung): when no daemon heartbeat has been seen for
+    > daemon.STALE_S (or its pid is dead), start one (``kdev serve ensure``). ``only_if_seen``: only when a
+    heartbeat row exists, i.e. a daemon served this KDEV_HOME and did not stop cleanly (a laptop that never ran
+    ``kdev serve`` keeps the direct path). ``KDEV_AUTO_SERVE=0`` disables. Returns daemon alive."""
+    if queue.daemon_alive(cfg):
+        return True
+    if not auto_serve_enabled():
+        return False
+    from kdev.service import daemon  # noqa: PLC0415
+
+    age = daemon.heartbeat_age_s(cfg)
+    if only_if_seen and age is None:
+        return False
+    try:
+        info = daemon.ensure(cfg)
+    except Exception as e:  # noqa: BLE001
+        print(f"kdev: could not start kdev serve: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+        return False
+    if info.get("started"):
+        last = "never" if age is None else f"{age:.0f}s ago"
+        print(f"kdev: no daemon heartbeat (last {last}): started kdev serve pid {info.get('pid')}",
+              file=sys.stderr, flush=True)
+    return bool(info.get("alive"))
+
+
 def submit(cfg: Config, spec: JobSpec) -> JobStatus:
-    """Enqueue (service must be alive) and return the status."""
+    """Enqueue (service must be alive; started by the watchdog if it is not) and return the status."""
     _deny_check(cfg, spec)
-    if not queue.daemon_alive(cfg):
+    if not queue.daemon_alive(cfg) and not ensure_daemon(cfg):
         raise KdevError(ErrorCode.CAPABILITY_UNAVAILABLE, "kdev serve is not running (no fresh heartbeat)",
                         recovery="start it with `kdev serve start`, or use --direct")
     return queue.enqueue(cfg, spec)
@@ -60,16 +95,32 @@ def wait(cfg: Config, job_id: str, timeout_s: float | None = None, poll_s: float
     """Block until done; return the job's Result (from result.json). On timeout return a Result with status
     'ok' and verdict 'pending' carrying job_id (the job keeps running)."""
     t0 = time.monotonic()
+    t_check = t0
     while True:
         st = queue.get(cfg, job_id)
         if st.state in queue.TERMINAL:
             return _job_result(cfg, st)
+        if time.monotonic() - t_check >= AUTO_SERVE_CHECK_S:
+            t_check = time.monotonic()
+            _watchdog(cfg, waited_s=t_check - t0)
         if timeout_s is not None and time.monotonic() - t0 >= timeout_s:
             where = f"position {st.position}" if st.position else st.state
             return Result(tool=st.kind, status="ok", verdict="pending", job_id=st.job_id, run_id=st.run_id,
                           summary={"state": st.state, "position": st.position, "waited_s": round(time.monotonic() - t0, 1)},
                           lines=[f"job: {st.job_id}  {where}"], next=[f"kdev job wait {st.job_id}"])
         time.sleep(poll_s)
+
+
+def _watchdog(cfg: Config, waited_s: float) -> None:
+    """While waiting: the daemon died (stale / missing heartbeat for > STALE_S) -> start a new one; it marks
+    jobs the dead daemon left 'running' as failed and serves the queued ones, so this wait ends."""
+    from kdev.service import daemon  # noqa: PLC0415
+
+    if queue.daemon_alive(cfg) or not auto_serve_enabled():
+        return
+    age = daemon.heartbeat_age_s(cfg)
+    if (age if age is not None else waited_s) > daemon.STALE_S:
+        ensure_daemon(cfg)
 
 
 def run_direct(cfg: Config, spec: JobSpec, timeout_s: float | None = None) -> Result:
@@ -99,7 +150,7 @@ def submit_and_maybe_wait(cfg: Config, spec: JobSpec, *, detach: bool = False, d
                             recovery="unset KDEV_NO_GPU on a GPU host")
         if direct:
             return run_direct(cfg, spec, timeout_s)
-        if queue.daemon_alive(cfg):
+        if queue.daemon_alive(cfg) or ensure_daemon(cfg, only_if_seen=True):
             st = submit(cfg, spec)
             if detach:
                 return Result(tool=spec.kind, status="ok", verdict="queued", job_id=st.job_id,

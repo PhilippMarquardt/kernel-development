@@ -94,6 +94,7 @@ Never edit NOTES.md, LESSONS.md or TRACKER.md by hand. `kdev doc append` only ad
   belong to the coordinator (`kdev judge record JOB.json` files them into the ledger).
 - Keep each GPU job short (one file pair, default reps). Other agents are queued behind you.
 - A daemon (`kdev serve start`) is optional. Without one, GPU commands run in `--direct` mode under the same
-  flock.
+  flock. `kdev serve ensure` starts it unless alive (idempotent); once a daemon has served a KDEV_HOME, GPU
+  commands restart a dead one (no heartbeat for 30 s) before waiting (`KDEV_AUTO_SERVE=0` disables).
 - MCP clients: `kdev mcp` exposes the same commands as `kdev_*` tools (see docs/MCP.md), including
   `kdev_board` and `kdev_doc`.

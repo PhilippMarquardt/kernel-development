@@ -23,8 +23,16 @@ another foreign flock user), the parked process gives up (``Requeue``), exits, a
 (a fresh prepare). Non-phased kdev holders (``lock.exclusive``) register as ``holding`` and ignore parked pids.
 
 Registry: ``$KDEV_HOME/phase/procs/<pid>.json`` {pid, start (proc start ticks: pid-reuse guard), state, job,
-agent, t, t_wait}; states: wait_sh | preparing | parked | ready | timing | holding. Stale entries (dead pid /
-other start time) are ignored and removed. Opt-out: ``KDEV_PHASED=0`` or ``extra.phased = false``.
+agent, t, t_wait, t_starve}; states: wait_slot | wait_sh | preparing | parked | ready | timing | holding. Stale
+entries (dead pid / other start time) are ignored and removed. Opt-out: ``KDEV_PHASED=0`` or ``extra.phased = false``.
+
+Fairness (board #314: discover jobs sat 10-25 min in wait_slot while other agents' ab jobs kept cycling the prepare
+slot and EX sections): a ``wait_slot`` / ``wait_sh`` waiter that has waited ``STARVE_S`` (``$KDEV_PHASE_STARVE_S``,
+default 30 s, 0 = off) is *starving*. A starving SH waiter stops deferring to ready phased processes (writer
+preference), and new takers yield to it (turnstile): ab parents do not take a free prepare slot while a slot waiter
+starves, phased/whole/non-phased EX acquisitions do not request the flock while a SH waiter starves. Each taker
+yields at most ``YIELD_S`` (``$KDEV_PHASE_YIELD_S``, default 120 s) per acquisition, so both sides wait bounded.
+Timed sections stay strictly EXCLUSIVE (the flock itself is unchanged).
 """
 from __future__ import annotations
 
@@ -45,6 +53,10 @@ DEFAULT_SLOTS = 1                                 # 6 = concurrent prepares: per
 BAIL_S = 6.0                                      # lock held by a non-kdev process this long -> parked gives up
 HIGH_FD = 900
 REQUEUE_FLAG = "phase_requeue"
+STARVE_S = 30.0                                   # a slot/SH waiter waiting this long is starving (turnstile)
+YIELD_S = 120.0                                   # a taker yields to starving waiters at most this long
+SLOT_WAIT = ("wait_slot",)
+SH_WAIT = ("wait_sh",)
 
 Stop = Callable[[], None]
 
@@ -173,12 +185,103 @@ def n_slots() -> int:
         return DEFAULT_SLOTS
 
 
-def must_defer(me_t: float, waiters: list[Any], reg: list[dict[str, Any]], me: int | None = None) -> bool:
+def _env_s(name: str, default: float) -> float:
+    try:
+        return max(0.0, float(os.environ.get(name, default)))
+    except ValueError:
+        return default
+
+
+def starve_s() -> float:
+    return _env_s("KDEV_PHASE_STARVE_S", STARVE_S)
+
+
+def yield_s() -> float:
+    return _env_s("KDEV_PHASE_YIELD_S", YIELD_S)
+
+
+def _t_starve(e: dict[str, Any]) -> Any:
+    return e.get("t_starve", e.get("t_wait"))
+
+
+def starving(reg: list[dict[str, Any]], states: tuple[str, ...], *, me: int | None = None, now: float | None = None,
+             older_than: float | None = None, limit_s: float | None = None) -> list[dict[str, Any]]:
+    """Pure: registry entries in ``states`` that have waited >= ``limit_s`` (default starve_s(); 0 = off), oldest
+    first; ``older_than``: only waiters that started waiting before that wall time (FIFO among starvers)."""
+    lim = starve_s() if limit_s is None else limit_s
+    if lim <= 0:
+        return []
+    now = time.time() if now is None else now
+    out = []
+    for e in reg:
+        if e.get("state") not in states or (me is not None and int(e.get("pid", -1)) == me):
+            continue
+        t = _t_starve(e)
+        if not isinstance(t, (int, float)) or now - t < lim:
+            continue
+        if older_than is not None and t >= older_than:
+            continue
+        out.append(e)
+    return sorted(out, key=_t_starve)
+
+
+class Turnstile:
+    """A taker's bounded yield to starving waiters: ``blocked()`` is True while a waiter in ``states`` starves,
+    for at most ``max_s`` (default yield_s()) per acquisition; ``reset()`` after the acquisition."""
+
+    def __init__(self, home: Any = None, states: tuple[str, ...] = SH_WAIT, *, me: int | None = None,
+                 older_than: float | None = None, max_s: float | None = None,
+                 reg_fn: Callable[[], list[dict[str, Any]]] | None = None,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        self.home, self.states, self.me, self.older_than = home, states, me, older_than
+        self.max_s = yield_s() if max_s is None else max_s
+        self.reg_fn = reg_fn or (lambda: entries(self.home))
+        self.clock = clock
+        self.t0: float | None = None
+        self.yielded_s = 0.0
+        self.to: list[int] = []
+
+    def blocked(self) -> bool:
+        if self.max_s <= 0:
+            return False
+        now = self.clock()
+        if self.t0 is not None and now - self.t0 >= self.max_s:
+            return False                         # bounded: the taker goes ahead
+        try:
+            st = starving(self.reg_fn(), self.states, me=self.me, older_than=self.older_than)
+        except Exception:  # noqa: BLE001
+            st = []
+        if not st:
+            self.reset()
+            return False
+        if self.t0 is None:
+            self.t0 = now
+        self.to = sorted({int(e["pid"]) for e in st} | set(self.to))
+        return True
+
+    def reset(self) -> None:
+        if self.t0 is not None:
+            self.yielded_s += self.clock() - self.t0
+        self.t0 = None
+
+    def wait(self, stop: Stop = _noop, poll_s: float = 0.5) -> float:
+        """Block while blocked() (calling ``stop()``); returns the seconds yielded in this call."""
+        t0 = self.clock()
+        while self.blocked():
+            stop()
+            time.sleep(poll_s)
+        self.reset()
+        return self.clock() - t0
+
+
+def must_defer(me_t: float, waiters: list[Any], reg: list[dict[str, Any]], me: int | None = None,
+               starving: bool = False) -> bool:
     """Pure: should a phased preparer that started waiting at ``me_t`` hold back its SH request?
-    Yes while a phased process is ready to time (writer preference), or while an EX waiter that is not a
-    phased process queued before it (FIFO with gpu_run.sh / non-phased kdev jobs)."""
+    Yes while a phased process is ready to time (writer preference; not once this waiter is ``starving``:
+    then new EX takers yield to it, see Turnstile), or while an EX waiter that is not a phased process
+    queued before it (FIFO with gpu_run.sh / non-phased kdev jobs)."""
     me = os.getpid() if me is None else me
-    if any(e.get("state") == "ready" and int(e["pid"]) != me for e in reg):
+    if not starving and any(e.get("state") == "ready" and int(e["pid"]) != me for e in reg):
         return True
     phased = {int(e["pid"]) for e in reg}
     for w in waiters:
@@ -252,11 +355,16 @@ def try_slot(home: Any = None, n: int | None = None) -> int | None:
     return None
 
 
-def wait_slot(home: Any = None, stop: Stop = _noop, poll_s: float = 0.5, n: int | None = None) -> int:
+def wait_slot(home: Any = None, stop: Stop = _noop, poll_s: float = 0.5, n: int | None = None,
+              gate: Turnstile | None = None) -> int:
+    """Poll for a prepare slot; ``gate``: yield (bounded) to older starving slot waiters."""
     while True:
-        fd = try_slot(home, n)
-        if fd is not None:
-            return fd
+        if gate is None or not gate.blocked():
+            fd = try_slot(home, n)
+            if fd is not None:
+                if gate is not None:
+                    gate.reset()
+                return fd
         stop()
         time.sleep(poll_s)
 
@@ -281,7 +389,9 @@ class PhaseFacts:
     parked_s: float = 0.0
     ex_wait_s: float = 0.0
     foreign_wait_s: float = 0.0
+    yielded_s: float = 0.0                        # turnstile: this taker gave way to starving waiters
     deferred: int = 0
+    starved: bool = False                         # this waiter starved (writer preference lifted for it)
     exclusive: str = "unknown"
     whole: bool = False
 
@@ -331,12 +441,15 @@ class PhasedLock:
         from kdev.service import lockq
 
         t0 = time.monotonic()
+        t_starve = time.time()
         if self.slot_fd is None:
-            self.entry.set("wait_slot")
-            self.slot_fd = wait_slot(self.home, self.stop)
+            self.entry.set("wait_slot", t_wait=t_starve, t_starve=t_starve)
+            gate = Turnstile(self.home, SLOT_WAIT, me=self.entry.pid, older_than=t_starve)
+            self.slot_fd = wait_slot(self.home, self.stop, gate=gate)
+            self.facts.yielded_s += gate.yielded_s
         self.facts.slot_wait_s = time.monotonic() - t0
         t1 = time.time()
-        self.entry.set("wait_sh", t_wait=t1)
+        self.entry.set("wait_sh", t_wait=t1, t_starve=t_starve)
         try:
             cfg = load_config()
             cfg.lock_path = self.lock_path
@@ -344,15 +457,21 @@ class PhasedLock:
             cfg = None
         while not self.whole:
             self.stop()
+            lim = starve_s()
+            starved = lim > 0 and time.time() - t_starve >= lim
+            self.facts.starved = self.facts.starved or starved
             try:
                 qv = lockq.view(cfg) if cfg is not None else None
-                defer = must_defer(t1, qv.waiters if qv else [], entries(self.home))
+                defer = must_defer(t1, qv.waiters if qv else [], entries(self.home), me=self.entry.pid,
+                                   starving=starved)
             except Exception:  # noqa: BLE001
                 defer = False
             if not defer:
                 break
             self.facts.deferred += 1
             time.sleep(1.0)
+        if self.whole:                            # EX taker: yield (bounded) to starving SH waiters first
+            self.facts.yielded_s += Turnstile(self.home, SH_WAIT, me=self.entry.pid).wait(self.stop)
         Path(self.lock_path).parent.mkdir(parents=True, exist_ok=True)
         self.fd = os.open(self.lock_path, os.O_WRONLY | os.O_CREAT, 0o666)
         _flock_wait(self.fd, fcntl.LOCK_EX if self.whole else fcntl.LOCK_SH, self.stop)
@@ -417,6 +536,8 @@ class PhasedLock:
                 self.stop()
                 give_way()
 
+            # turnstile: a SH waiter that starved (other agents' timed sections back to back) goes first
+            self.facts.yielded_s += Turnstile(self.home, SH_WAIT, me=self.entry.pid).wait(_every(stop, 1.0))
             _flock_wait(self.fd, fcntl.LOCK_EX, _every(stop, 1.0))
             self.fd = _high(self.fd)              # kept until exit: CUDA teardown stays inside EX
         self.entry.set("timing")
