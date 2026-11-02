@@ -539,3 +539,22 @@ def test_daemon_runs_gpu_jobs_in_parallel_lanes(cfg, no_apps):
     finally:
         daemon.stop(cfg, timeout_s=1)
         t.join(30)
+
+
+def test_claim_next_fair_share_across_agents(cfg):
+    """An agent with a running job yields to another agent's queued job, even if that one is younger."""
+    a1 = spec(); a1.agent = "A"
+    a2 = spec(); a2.agent = "A"
+    b1 = spec(); b1.agent = "B"
+    ja = queue.enqueue(cfg, a1).job_id
+    jb2 = queue.enqueue(cfg, a2).job_id
+    jb = queue.enqueue(cfg, b1).job_id
+    conn = queue.connect(cfg)
+    try:
+        first = queue.claim_next(conn, "gpu")
+        assert first.job_id == ja
+        second = queue.claim_next(conn, "gpu")
+        assert second.job_id == jb, "B must go before A's second job"
+        assert queue.claim_next(conn, "gpu").job_id == jb2
+    finally:
+        conn.close()

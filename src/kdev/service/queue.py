@@ -162,8 +162,12 @@ def claim_next(conn: sqlite3.Connection, lane: str) -> JobSpec | None:
     """Daemon: atomically move the highest-priority oldest queued job of a lane to running."""
     conn.execute("BEGIN IMMEDIATE")
     try:
-        row = conn.execute(f"SELECT job_id, spec_json FROM jobs WHERE lane=? AND state='queued' ORDER BY {_ORDER} "
-                           "LIMIT 1", (lane,)).fetchone()
+        # Fair share: prefer the agent with the fewest running jobs, then priority/age. One agent submitting a
+        # burst of checks must not starve the others' ab runs (pod 11-02: 1 agent queued 9 checks ahead of all).
+        row = conn.execute("SELECT j.job_id, j.spec_json FROM jobs j WHERE j.lane=? AND j.state='queued' ORDER BY "
+                           "(SELECT COUNT(*) FROM jobs r WHERE r.state='running' AND r.lane=j.lane "
+                           "AND COALESCE(r.agent,'')=COALESCE(j.agent,'')) ASC, "
+                           "j.priority DESC, j.submitted_utc ASC, j.rowid ASC LIMIT 1", (lane,)).fetchone()
         if row is None:
             conn.execute("COMMIT")
             return None
