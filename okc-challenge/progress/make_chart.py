@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 HERE = Path(__file__).parent
 CLOSE = dt.datetime(2026, 11, 5, 8, 59)
 START = dt.datetime(2026, 10, 30, 12, 0)
-ORDER = [("attention", "Attention"), ("moe", "MoE"), ("decode", "Decode"), ("prefill", "Prefill"), ("bf16", "BF16")]
+ORDER = [("moe", "MoE"), ("bf16", "BF16")]
 THEMES = {
     "progress.png": {
         "surface": "#fcfcfb",
@@ -62,21 +62,21 @@ def draw(rows, filename, theme):
     note = {"fontsize": 9.5, "color": theme["secondary"], "ha": "left", "va": "top"}
     ax.annotate(
         "Oct 30 to 31: public engines adopted",
-        (dt.datetime(2026, 10, 30, 23, 20), 2.60),
-        xytext=(dt.datetime(2026, 10, 31, 6, 0), 2.86),
+        (dt.datetime(2026, 10, 30, 23, 20), 2.33),
+        xytext=(dt.datetime(2026, 10, 31, 6, 0), 2.72),
         arrowprops={"arrowstyle": "-", "color": theme["secondary"], "linewidth": 0.8},
         **note,
     )
     ax.annotate(
         "Nov 5: MoE with our own engines\nfor small sizes reaches the board",
         (dt.datetime(2026, 11, 5, 0, 20), 2.443),
-        xytext=(dt.datetime(2026, 11, 3, 3, 0), 2.86),
+        xytext=(dt.datetime(2026, 11, 3, 3, 0), 2.72),
         arrowprops={"arrowstyle": "-", "color": theme["secondary"], "linewidth": 0.8},
         **note,
     )
 
     ax.set_xlim(START, CLOSE + dt.timedelta(hours=3))
-    ax.set_ylim(1.0, 2.95)
+    ax.set_ylim(1.0, 2.8)
     ax.xaxis.set_major_locator(mdates.DayLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
     ax.set_ylabel("Speedup over baseline", color=theme["secondary"], fontsize=10.5)
@@ -87,7 +87,7 @@ def draw(rows, filename, theme):
         ax.spines[side].set_visible(False)
     ax.spines["bottom"].set_color(theme["grid"])
 
-    ax.set_title("Score over time, kernel track", loc="left", color=theme["primary"], fontsize=15, fontweight="semibold", pad=34)
+    ax.set_title("Score over time: MoE and BF16", loc="left", color=theme["primary"], fontsize=15, fontweight="semibold", pad=34)
     ax.text(
         0,
         1.03,

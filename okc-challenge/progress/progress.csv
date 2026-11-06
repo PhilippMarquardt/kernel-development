@@ -13,28 +13,6 @@ moe,2026-11-05 00:20,2.443,board,job 0fa1455a
 moe,2026-11-05 01:15,2.460,board,job 329ae2c3
 moe,2026-11-05 03:25,2.477,board,job 3e06dfb1
 moe,2026-11-05 04:40,2.512,board,job 986b61b3
-decode,2026-10-30 18:50,1.170,check,best_1.17.py
-decode,2026-10-30 19:18,1.210,check,best_1.21.py
-decode,2026-10-30 19:56,1.280,check,best_1.28.py
-decode,2026-10-30 20:20,1.360,check,best_1.36.py
-decode,2026-10-30 20:58,1.520,check,best_1.52.py
-decode,2026-10-30 22:58,1.588,check,best_1.588.py
-decode,2026-10-30 23:27,2.097,check,best_2.097.py
-decode,2026-10-31 01:47,2.197,check,best_2.197.py
-decode,2026-10-31 14:38,2.191,board,first submission
-decode,2026-11-05 02:27,2.247,board,job c9713168
-decode,2026-11-05 07:58,2.283,board,job aa5b8d47
-attention,2026-10-30 18:50,1.236,check,best_1.236.py
-attention,2026-10-30 19:14,1.419,check,best_1.419.py
-attention,2026-10-30 19:41,1.469,check,best_1.469.py
-attention,2026-10-30 19:51,1.639,check,best_1.639.py
-attention,2026-10-30 20:04,1.660,check,best_1.660.py
-attention,2026-10-30 22:19,1.923,check,best_1.923.py
-attention,2026-10-30 23:21,2.593,check,best_2.593.py
-attention,2026-10-31 13:18,2.624,check,best_2.624.py
-attention,2026-10-31 14:38,2.612,board,first submission
-attention,2026-11-05 02:40,2.616,board,tracker
-attention,2026-11-05 08:30,2.642,board,job 853577f0
 bf16,2026-10-30 19:52,1.230,check,best_1.230.py
 bf16,2026-10-30 22:58,1.273,check,best_1.273.py
 bf16,2026-10-31 01:08,1.468,check,best_1.468.py
@@ -45,14 +23,3 @@ bf16,2026-10-31 19:30,1.578,board,best_1.572 scored
 bf16,2026-10-31 22:20,1.583,board,m2 scored
 bf16,2026-11-01 02:10,1.600,board,m2 rerun
 bf16,2026-11-04 22:00,1.610,board,m2 rerun s5
-prefill,2026-10-30 18:37,1.186,check,best_1.186.py
-prefill,2026-10-30 18:44,1.247,check,best_1.247.py
-prefill,2026-10-30 18:48,1.293,check,best_1.293.py
-prefill,2026-10-30 19:18,1.396,check,best_1.396.py
-prefill,2026-10-30 19:22,1.402,check,best_1.402.py
-prefill,2026-10-30 19:38,1.403,check,best_1.403.py
-prefill,2026-10-30 22:12,1.586,check,best_1.586.py
-prefill,2026-10-31 00:44,1.744,check,best_1.744.py
-prefill,2026-10-31 01:58,1.802,check,best_1.802.py
-prefill,2026-10-31 11:54,1.817,check,best_1.817.py
-prefill,2026-10-31 14:38,1.827,board,first submission

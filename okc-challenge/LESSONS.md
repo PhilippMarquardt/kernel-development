@@ -2,7 +2,7 @@
 
 ## Measuring
 
-**Match the judge's toolchain first.** A local build with nvcc 12.8 serialized an attention kernel that the judge's CUDA 13 build did not. That made one kernel look 27% slower (491 vs 357 µs) and flipped a design decision. A local result is only comparable once the compiler version matches.
+**Match the judge's toolchain first.** A local build with nvcc 12.8 serialized a kernel that the judge's CUDA 13 build did not. That made one kernel look 27% slower (491 vs 357 µs) and flipped a design decision. A local result is only comparable once the compiler version matches.
 
 **Reproduce the judge's cache state.** Our harness flushed the L2 cache by writing a buffer, and the judge flushes by reading one. The dirty lines were written back during the timed kernel, which added 1–2.5 µs to small kernels and inflated every estimate of the gap to the floor.
 

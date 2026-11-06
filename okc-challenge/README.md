@@ -1,34 +1,32 @@
 # Open Kernel Challenge: GPU kernel optimization case study
 
-The Muse Spark Open Kernel Challenge asked 2,014 participants to speed up five inference kernels on an NVIDIA H200, using a judge that measures real speedup against a stock baseline and checks that results stay correct.
+The Muse Spark Open Kernel Challenge asked 2,014 participants to speed up five inference kernels on an NVIDIA H200, using a judge that measures real speedup against a stock baseline and checks that results stay correct. I focused on two of them: MoE and BF16 projection.
 
-I placed **148th overall (top 7.3%)** and **43rd of 1,747 on BF16 projection**. The work was done by AI coding agents under my direction on one rented H200, using `kdev`, the toolkit in this repository, which was built for the challenge. My part was setting direction, reviewing evidence and deciding what to pursue.
+I placed **148th overall (top 7.3%)** with **43rd of 1,747 on BF16 projection** and **60th of 1,426 on MoE**. The work was done by AI coding agents under my direction on one rented H200, using `kdev`, the toolkit in this repository, which was built for the challenge. My part was setting direction, reviewing evidence and deciding what to pursue.
 
 ## Results
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="progress/progress-dark.png">
-  <img alt="Line chart of score over time for the five kernel problems, Oct 30 to Nov 5. All five rise steeply in the first day, stay nearly flat until Nov 4, and MoE, Decode and Attention rise again on Nov 5. Final values: Attention 2.642, MoE 2.512, Decode 2.283, Prefill 1.827, BF16 1.610." src="progress/progress.png">
+  <img alt="Line chart of score over time for MoE and BF16, Oct 30 to Nov 5. Both rise steeply in the first day. BF16 keeps rising slowly, and MoE stays flat until a second rise on Nov 5. Final values: MoE 2.512, BF16 1.610." src="progress/progress.png">
 </picture>
 
 | Problem | Speedup | Rank | Top |
 |---|---|---|---|
 | BF16 projection | 1.610x | 43 of 1,747 | 2.5% |
 | MoE | 2.512x | 60 of 1,426 | 4.2% |
-| Decode layer | 2.283x | 148 of 1,300 | 11.4% |
-| Attention decode | 2.642x | 216 of 1,380 | 15.7% |
-| Prefill layer | 1.827x | 203 of 899 | 22.6% |
 
 These are the board values when the kernel track closed on 2026-11-05, and the organizers could still revise them. Each one is the best of several noisy runs: the same MoE file scored between 2.451 and 2.512. The data behind the chart is in [`progress/progress.csv`](progress/progress.csv).
 
 ## What's mine and what isn't
 
-The submitted kernels build on public engines from other participants, mainly vjeux and alygg77, with my tuning on top. Adopting those engines caused the big jump on the first night. **Those submissions aren't in this repository, because they contain other people's code.**
+The submitted kernels build on public engines from other participants, mainly alygg77, with my tuning on top. Adopting those engines caused the big jump on the first night. **Those submissions aren't in this repository, because they contain other people's code.**
 
 My own work is:
 
 - **`kdev`**, the measurement and multi-agent toolkit, built with AI agents. See the [repository README](../README.md).
 - **MoE engines for small batch sizes.** Together with tuning the public engine for large sizes, they raised MoE from 2.366 to a repeat-check level of about 2.49. The sources are in [`engines/`](engines/).
+- **BF16 tuning.** Tuning the public engine raised BF16 from 1.539 to a repeat-run level of about 1.60.
 - **Hardware measurements** that showed where the time was going, in [`reports/`](reports/).
 
 ## How the work ran

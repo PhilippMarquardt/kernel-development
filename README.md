@@ -8,11 +8,11 @@ It was built with AI agents during the [Open Kernel Challenge](okc-challenge/REA
 
 ## Results
 
-Out of 2,014 participants, we finished 148th overall, and 43rd of 1,747 on our best problem.
+Out of 2,014 participants, we finished 148th overall, with 43rd of 1,747 on BF16 projection and 60th of 1,426 on MoE, the two problems we focused on.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="okc-challenge/progress/progress-dark.png">
-  <img alt="Line chart of score over time for the five kernel problems, Oct 30 to Nov 5. All five rise steeply in the first day, stay nearly flat until Nov 4, and MoE, Decode and Attention rise again on Nov 5. Final values: Attention 2.642, MoE 2.512, Decode 2.283, Prefill 1.827, BF16 1.610." src="okc-challenge/progress/progress.png">
+  <img alt="Line chart of score over time for MoE and BF16, Oct 30 to Nov 5. Both rise steeply in the first day. BF16 keeps rising slowly, and MoE stays flat until a second rise on Nov 5. Final values: MoE 2.512, BF16 1.610." src="okc-challenge/progress/progress.png">
 </picture>
 
 The [case study](okc-challenge/README.md) separates my own work from the public engines the submissions built on, and covers the [lessons learned](okc-challenge/LESSONS.md).
