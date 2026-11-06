@@ -1,5 +1,7 @@
 # kernel-development (`kdev`)
 
+> **Case study:** how this toolkit was used in the Open Kernel Challenge, with results, score history and lessons: [okc-challenge/](okc-challenge/README.md).
+
 `kdev` is a toolkit that coding agents (Claude Code, Codex) use to write and optimise GPU kernels on a remote
 GPU host. It plays the role for kernel work that REA ("Reverse Engineer Anything") plays for reverse
 engineering: one stable contract over many backend tools. The backends here are nvcc/ptxas, cuobjdump/nvdisasm,
