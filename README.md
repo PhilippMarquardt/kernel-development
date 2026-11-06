@@ -1,75 +1,71 @@
-# kernel-development (`kdev`)
+# kdev
 
-> **Case study:** how this toolkit was used in the Open Kernel Challenge, with results, score history and lessons: [okc-challenge/](okc-challenge/README.md).
+A toolkit that lets AI coding agents write and optimize GPU kernels with measurements you can trust.
 
-`kdev` is a toolkit that coding agents (Claude Code, Codex) use to write and optimise GPU kernels on a remote
-GPU host. It plays the role for kernel work that REA ("Reverse Engineer Anything") plays for reverse
-engineering: one stable contract over many backend tools. The backends here are nvcc/ptxas, cuobjdump/nvdisasm,
-CUDA graphs, CUPTI, `%globaltimer` instrumentation, compute-sanitizer, and ncu/nsys when they are permitted.
+Agents are good at trying ideas and bad at noticing when their benchmark is wrong. `kdev` gives them one command-line interface for building, testing, timing and analyzing kernels on a remote GPU. Its timing reproduces the conditions of the target judge by default, and every claim is tied to the run that backs it.
 
-**Status: v0.1, all packages built (P1-P8) and run end-to-end on the OKC H200 pod** (build, check, time,
-calib, sass, ab, serve, mcp). Agents: start with [docs/QUICKSTART.md](docs/QUICKSTART.md) (the 10 commands, in
-order) and [skills/kdev/SKILL.md](skills/kdev/SKILL.md). Design: [docs/DESIGN.md](docs/DESIGN.md); binding plan:
-[docs/PLAN.md](docs/PLAN.md); timing protocol and calibration evidence: [docs/PROTOCOL.md](docs/PROTOCOL.md).
-Multi-agent work (P9): `kdev board` (messages, claims with conflict detection, inbox) and `kdev doc` (append-only
-notes/lessons/tracker replacing hand-edited .md files): [docs/COLLAB.md](docs/COLLAB.md).
+It was built with AI agents during the [Open Kernel Challenge](okc-challenge/README.md), where about 40 agents shared one NVIDIA H200, after several days of results turned out to be invalid. The causes were a cache flush done the wrong way, the wrong compiler version, timing on a single seed, and comparing ratios instead of absolute times. `kdev` now prevents each of those.
+
+## Results
+
+Out of 2,014 participants, we finished 148th overall, and 43rd of 1,747 on our best problem.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="okc-challenge/progress/progress-dark.png">
+  <img alt="Line chart of score over time for the five kernel problems, Oct 30 to Nov 5. All five rise steeply in the first day, stay nearly flat until Nov 4, and MoE, Decode and Attention rise again on Nov 5. Final values: Attention 2.642, MoE 2.512, Decode 2.283, Prefill 1.827, BF16 1.610." src="okc-challenge/progress/progress.png">
+</picture>
+
+The [case study](okc-challenge/README.md) separates my own work from the public engines the submissions built on, and covers the [lessons learned](okc-challenge/LESSONS.md).
+
+## What it does
+
+**Timing you can compare.** Every measurement uses the pinned toolchain, a read flush of L2, CUDA graph replay, interleaved A/B with paired ratios and bootstrap confidence intervals, and an exclusive GPU lock that detects stray processes. Opting out of any of these is explicit and recorded in the result.
+
+**Output sized for agents.** Each command prints a verdict in at most about 40 lines and ends with a run ID. Full samples, disassembly and traces go to a run directory that agents read back in pages, and `--json` returns one JSON object.
+
+**Shared memory for many agents.** A ledger answers "has this already been tried?", a board handles claims and findings with conflict detection, and a "limit" or "dead" claim can't be closed without evidence attached.
+
+**Safe by default.** `kdev` never submits to a judge and never compiles while holding the GPU lock.
+
+## Example
+
+```bash
+kdev doctor --problem DIR               # check GPU, toolchain, lock
+kdev ledger tried cand.py               # already measured?
+kdev build cand.py                      # registers, spills, serialization warnings
+kdev check cand.py                      # correctness on fresh seeds, eager and graph
+kdev ab best.py cand.py                 # judge-style interleaved comparison
+kdev sass cand.py --kernel RE --loops   # hot-loop instruction mix and audits
+kdev note "CLAIM" --kind limit --evidence RUN_SASS,RUN_SWEEP
+```
+
+## Commands
+
+| Area | Commands |
+|---|---|
+| Build and correctness | `build`, `check`, `sanitize`, `comply` |
+| Timing | `time`, `ab`, `calib`, `sweep`, `ablate` |
+| Analysis | `sass`, `regs`, `timeline`, `floor`, `profile`, `dispatch` |
+| GPU job service | `serve`, `job`, `queue`, `lock` |
+| Agent collaboration | `ledger`, `idea`, `note`, `board`, `doc`, `dashboard` |
+| Remote and integration | `remote`, `sync`, `mcp` |
+
+Problem adapters supply the reference, checks, inputs and score. Adapters exist for the Open Kernel Challenge, KernelBench and standalone CUDA files. `kdev mcp` exposes the same commands as an MCP server.
 
 ## Install
 
-- On the GPU pod, from a local checkout: `scripts/pod_install.sh [HOST] [PORT]`. The script copies the repo
-  (md5-verified) to `/root/kdev` and runs `uv pip install --no-deps -e` into `/root/vsgl`. It aborts if any
-  existing package would change. It writes `/root/.kdev/kdev.toml` (lock `/root/gpu.lock`, okc_root
-  `/root/okc`) and `/root/.kdev/toolchain.lock` (judge CUDA 13.0 at `/root/cuda130w`). Pod storage is not
-  persistent, so re-run it after every pod restart.
-- Locally (ledger, sass, dashboard, MCP, tests; no GPU needed): `pip install -e ".[dev,mcp]"`, then `pytest`
-  and `ruff check src tests`.
+```bash
+pip install -e ".[dev,mcp]"   # ledger, SASS analysis, dashboard, MCP and tests; no GPU needed
+pytest
+```
 
-## Design in brief
+To install on a GPU host over SSH, run `scripts/pod_install.sh HOST PORT`.
 
-- **Interface.** `kdev` is a CLI with a JSON result contract, built over a Python library. It runs on the GPU
-  pod and is driven over ssh, either directly or through `kdev remote`. A Claude Code skill describes the
-  workflow. `kdev mcp` is an MCP stdio server generated from the same command registry.
-- **Judge fidelity by default.** Every timing uses:
-  - the pinned judge toolchain, recorded from the built `.so`;
-  - a read flush of L2;
-  - CUDA-graph replay;
-  - interleaved A/B with paired ratios and bootstrap CIs;
-  - multiple seeds when the input sample changes the work (e.g. MoE routing);
-  - overhead subtraction;
-  - an exclusive-GPU lock that detects unlocked CUDA processes.
+## Documentation
 
-  Opting out of any of these is possible, but it is explicit and recorded in the result.
-- **Context-economical.** Each command prints a summary of at most ~40 lines and the paths to its files. The
-  full output (samples, SASS, traces) goes to a run directory, and `kdev show` reads it back in pages.
-- **Tools.**
-
-  | Tool | What it does |
-  |---|---|
-  | `doctor` | Checks the GPU, toolchain, lock and permissions |
-  | `build` | Compiles only, never under the GPU lock; reports ptxas regs, spills and C751x warnings |
-  | `check` | Correctness on multiple seeds, eager and graph, repeated |
-  | `time`, `ab` | Judge-style timing of one file, or interleaved comparison of several |
-  | `sass` | Hot-loop opcode mix; audits for PDL hoisting, spills and serialization |
-  | `timeline` | Per-CTA phase timeline from `%globaltimer` marks |
-  | `floor` | Roofline plus a latency skeleton built from measured constants |
-  | `sweep` | Grid search over build knobs |
-  | `regs` | Register and occupancy report |
-  | `sanitize` | Runs compute-sanitizer |
-  | `profile` | Uses ncu when permitted, otherwise CUPTI |
-  | `dispatch` | Shows which kernels actually run for each shape |
-  | `calib` | Compares local timings against the judge |
-  | `judge` | Prepares and records judge runs (record-only) |
-  | `comply` | Checks the problem's rules |
-  | `queue` | GPU lock and queue status |
-  | `sync`, `remote` | Copies results between pod and local machine with md5 checks; runs commands on the pod |
-  | `note` | Records claims, each tied to the runs that back it |
-- **Safety.** `kdev` never submits to a judge. It refuses to compile while holding the GPU lock, guards
-  against reward hacking, and declares each tool's effects.
-- **Extensible.** Problem adapters supply the reference, checks, inputs and score. The first ones are OKC,
-  KernelBench, KernelBot, standalone `.cu` and Triton functions. GPU profiles (`gpus/*.toml`) hold each GPU's
-  peak numbers and measured constants.
-
-The requirements come from the Open Kernel Challenge, 2026-10: about 40 agents on one H200. They repeatedly
-rebuilt the same harnesses. Several days of results were invalidated by a write flush, the wrong nvcc, timing
-on one seed and comparing ratios instead of absolute times. DESIGN.md Section 3 maps each of those mistakes to
-a requirement.
+- [Quickstart](docs/QUICKSTART.md): the 10 core commands in order
+- [Timing protocol](docs/PROTOCOL.md): how timing works, with calibration evidence
+- [Design](docs/DESIGN.md): architecture and how each past mistake became a requirement
+- [Multi-agent collaboration](docs/COLLAB.md): board, claims and shared notes
+- [Adapters](docs/ADAPTERS.md): adding a new problem
+- [MCP server](docs/MCP.md)
