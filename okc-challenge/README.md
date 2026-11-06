@@ -1,8 +1,15 @@
 # Open Kernel Challenge: GPU kernel optimization case study
 
-The Muse Spark Open Kernel Challenge asked 2,014 participants to speed up five inference kernels on an NVIDIA H200, using a judge that measures real speedup against a stock baseline and checks that results stay correct. I focused on two of them: MoE and BF16 projection.
+**148th of 2,014 participants (top 7.3%), while seriously pursuing only 2 of the 5 problems.** The other three mostly ran on public engines with light tuning.
 
-I placed **148th overall (top 7.3%)** with **43rd of 1,747 on BF16 projection** and **60th of 1,426 on MoE**. The work was done by AI coding agents under my direction on one rented H200, using `kdev`, the toolkit in this repository, which was built for the challenge. My part was setting direction, reviewing evidence and deciding what to pursue.
+| Problem we pursued | Speedup | Rank | Top | Behind the winner |
+|---|---|---|---|---|
+| BF16 projection | 1.610x | 43 of 1,747 | **2.5%** | **6.8%** (winner 1.728x) |
+| MoE | 2.512x | 60 of 1,426 | **4.2%** | **11.7%** (winner 2.844x) |
+
+The Muse Spark Open Kernel Challenge asked 2,014 participants to speed up five inference kernels on an NVIDIA H200, using a judge that measures real speedup against a stock baseline and checks that results stay correct.
+
+The work was done by AI coding agents under my direction on one rented H200, using `kdev`, the toolkit in this repository, which was built for the challenge. My part was setting direction, reviewing evidence and deciding what to pursue.
 
 ## Results
 
@@ -10,11 +17,6 @@ I placed **148th overall (top 7.3%)** with **43rd of 1,747 on BF16 projection** 
   <source media="(prefers-color-scheme: dark)" srcset="progress/progress-dark.png">
   <img alt="Line chart of score over time for MoE and BF16, Oct 30 to Nov 5. Both rise steeply in the first day. BF16 keeps rising slowly, and MoE stays flat until a second rise on Nov 5. Final values: MoE 2.512, BF16 1.610." src="progress/progress.png">
 </picture>
-
-| Problem | Speedup | Rank | Top |
-|---|---|---|---|
-| BF16 projection | 1.610x | 43 of 1,747 | 2.5% |
-| MoE | 2.512x | 60 of 1,426 | 4.2% |
 
 These are the board values when the kernel track closed on 2026-11-05, and the organizers could still revise them. Each one is the best of several noisy runs: the same MoE file scored between 2.451 and 2.512. The data behind the chart is in [`progress/progress.csv`](progress/progress.csv).
 

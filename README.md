@@ -8,7 +8,12 @@ It was built with AI agents during the [Open Kernel Challenge](okc-challenge/REA
 
 ## Results
 
-Out of 2,014 participants, we finished 148th overall, with 43rd of 1,747 on BF16 projection and 60th of 1,426 on MoE, the two problems we focused on.
+**148th of 2,014 participants (top 7.3%), while seriously pursuing only 2 of the 5 problems.** The other three mostly ran on public engines with light tuning.
+
+| Problem we pursued | Speedup | Rank | Top | Behind the winner |
+|---|---|---|---|---|
+| BF16 projection | 1.610x | 43 of 1,747 | **2.5%** | **6.8%** (winner 1.728x) |
+| MoE | 2.512x | 60 of 1,426 | **4.2%** | **11.7%** (winner 2.844x) |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="okc-challenge/progress/progress-dark.png">
