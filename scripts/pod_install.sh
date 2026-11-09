@@ -14,13 +14,13 @@
 #   5. links /usr/local/bin/kdev and prints `kdev version`.
 # Never touches /workspace, never runs GPU work, never calls okc.
 #
-# env: KEY (~/.ssh/runpod_ed25519), PY (/root/vsgl/bin/python), DEST (/root/kdev), KHOME (/root/.kdev),
+# env: KEY (~/.ssh/<key>), PY (/root/vsgl/bin/python), DEST (/root/kdev), KHOME (/root/.kdev),
 #      CUDA (/root/cuda130w), OKC (/root/okc), LOCK (/root/gpu.lock), WITH_MCP (1), FORCE_CONFIG (0)
 set -euo pipefail
 
-HOST=${1:-103.196.86.128}
-PORT=${2:-20860}
-KEY=${KEY:-$HOME/.ssh/runpod_ed25519}
+HOST=${1:?usage: pod_install.sh <host> <port>}
+PORT=${2:?usage: pod_install.sh <host> <port>}
+KEY=${KEY:-$HOME/.ssh/id_ed25519}
 PY=${PY:-/root/vsgl/bin/python}
 DEST=${DEST:-/root/kdev}
 KHOME=${KHOME:-/root/.kdev}

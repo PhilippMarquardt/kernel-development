@@ -1,6 +1,6 @@
 # kdev quickstart (optimisation agents)
 
-kdev runs on the GPU pod (`ssh -i ~/.ssh/runpod_ed25519 -p PORT root@HOST`; installed by
+kdev runs on the GPU pod (`ssh -i ~/.ssh/<key> -p PORT root@HOST`; installed by
 `scripts/pod_install.sh`). Each command prints at most 40 lines, starting with the verdict and ending with
 `run: <id>`. That run id is your evidence. Add `--json` to get one JSON object. Read large outputs with
 `kdev show RUN --section S` and never `cat` the files in a run directory. Every error carries a code and a
